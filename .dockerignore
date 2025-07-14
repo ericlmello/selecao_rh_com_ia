@@ -1,9 +1,35 @@
-.git
-__pycache__
+# --- Ambientes Virtuais e Caches do Python ---
+# Ignora pastas de ambiente virtual comuns
+.venv/
+venv/
+env/
+
+# Ignora o cache do Python
+__pycache__/
 *.pyc
-.venv
-venv
+
+# Ignora o cache do Pytest
+.pytest_cache/
+
+# --- Ficheiros de Configuração e Sistema Operacional ---
+# Ignora ficheiros de variáveis de ambiente
 .env
+
+# Ignora ficheiros de sistema do macOS
 .DS_Store
+
+# --- Ficheiros Gerados pela Aplicação (MUITO IMPORTANTE) ---
+# Ignora a pasta de dados que é descarregada e extraída
+data/
+
+# Ignora os ficheiros .zip temporários descarregados do Google Drive
+*.zip
+
+# Ignora o banco de dados SQLite
+predictions.db
+
+# Ignora todos os ficheiros de log
 *.log
-.pytest_cache
+
+# Ignora a pasta de experimentos do MLflow
+mlruns/
