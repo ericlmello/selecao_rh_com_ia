@@ -2,6 +2,7 @@ services:
   - type: web
     name: sistema-selecao-fiap
     env: python
+    region: frankfurt # Especificar uma região é uma boa prática
     plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app --timeout 120"
