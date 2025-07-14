@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Matches Automáticos</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border: 2px solid #e9ecef;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+            display: block;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            align-items: center;
+        }
+
+        .load-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .load-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        .load-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 25px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .matches-container {
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .matches-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .matches-list {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .match-item {
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: grid;
+            grid-template-columns: 80px 1fr 200px;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .match-item:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
+        }
+
+        .match-item:last-child {
+            border-bottom: none;
+        }
+
+        .match-percentage {
+            font-size: 2em;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+            border-radius: 50%;
+            color: white;
+            min-width: 70px;
+            min-height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .percentage-high { background: linear-gradient(135deg, #28a745, #20c997); }
+        .percentage-medium { background: linear-gradient(135deg, #ffc107, #fd7e14); }
+        .percentage-low { background: linear-gradient(135deg, #dc3545, #c82333); }
+
+        .match-details {
+            flex: 1;
+        }
+
+        .match-job {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+
+        .match-candidate {
+            color: #667eea;
+            font-size: 1em;
+            margin-bottom: 5px;
+        }
+
+        .match-info {
+            font-size: 0.85em;
+            color: #6c757d;
+        }
+
+        .match-status {
+            text-align: center;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-approved { background: #d4edda; color: #155724; }
+        .status-rejected { background: #f8d7da; color: #721c24; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+        }
+
+        .clear-filter {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            margin-left: 10px;
+        }
+
+        .clear-filter:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span>🎯</span>
+                Matches Automáticos
+            </h1>
+            <p>Sistema de Análise de Compatibilidade com IA - Resultados Ordenados por Probabilidade</p>
+        </div>
+
+        <div class="content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-number" id="totalMatches">-</span>
+                    <div class="stat-label">Matches Analisados</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="highMatches">-</span>
+                    <div class="stat-label">Alto Potencial (>70%)</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="averageScore">-</span>
+                    <div class="stat-label">Pontuação Média</div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-number" id="systemStatus">🔄</span>
+                    <div class="stat-label">Status do Sistema</div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="load-btn" id="loadBtn" onclick="loadAndAnalyzeMatches()">
+                    <span>🚀</span>
+                    Carregar e Analisar Matches
+                </button>
+                <input type="text" class="filter-input" id="filterInput" placeholder="🔍 Filtrar por vaga ou candidato..." oninput="filterMatches()">
+                <button class="clear-filter" id="clearFilter" onclick="clearFilter()" style="display: none;">
+                    ✕ Limpar
+                </button>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color percentage-high"></div>
+                    <span>Alto Potencial (>70%)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color percentage-medium"></div>
+                    <span>Médio Potencial (30-70%)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color percentage-low"></div>
+                    <span>Baixo Potencial (<30%)</span>
+                </div>
+            </div>
+
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <div class="matches-container">
+                <div class="matches-header">
+                    <span>Matches com Probabilidades Calculadas</span>
+                    <span id="matchCount">0 matches</span>
+                </div>
+                
+                <div class="matches-list" id="matchesList">
+                    <div class="empty-state">
+                        <h3>🎯 Pronto para Analisar</h3>
+                        <p>Clique em "Carregar e Analisar Matches" para ver as compatibilidades calculadas automaticamente.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allMatches = [];
+        let currentFilter = '';
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSystemHealth();
+        });
+
+        async function checkSystemHealth() {
+            try {
+                const response = await fetch('/health');
+                const health = await response.json();
+                updateSystemStatus(health.status === 'ok' ? '✅' : '❌');
+            } catch (error) {
+                updateSystemStatus('❌');
+            }
+        }
+
+        function updateSystemStatus(status) {
+            document.getElementById('systemStatus').textContent = status;
+        }
+
+        async function loadAndAnalyzeMatches() {
+            const loadBtn = document.getElementById('loadBtn');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            const matchesList = document.getElementById('matchesList');
+
+            loadBtn.disabled = true;
+            loadBtn.innerHTML = '<span>⏳</span> Carregando...';
+            progressBar.style.display = 'block';
+            
+            matchesList.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Carregando matches e calculando probabilidades...</p>
+                </div>
+            `;
+
+            try {
+                // Carregar matches básicos
+                progressFill.style.width = '20%';
+                const matchesResponse = await fetch('/matches');
+                const matches = await matchesResponse.json();
+
+                if (!Array.isArray(matches) || matches.length === 0) {
+                    throw new Error('Nenhum match encontrado');
+                }
+
+                // Calcular probabilidades para cada match
+                allMatches = [];
+                const total = Math.min(matches.length, 500); // Limitar a 500 para análise ampliada
+
+                for (let i = 0; i < total; i++) {
+                    const match = matches[i];
+                    progressFill.style.width = `${20 + (i / total) * 70}%`;
+                    
+                    try {
+                        const predictionResponse = await fetch('/predict', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                job_id: match.vaga_id,
+                                candidate_id: match.candidato_id,
+                                comment: 'Análise automática'
+                            })
+                        });
+
+                        const prediction = await predictionResponse.json();
+                        
+                        if (predictionResponse.ok) {
+                            allMatches.push({
+                                ...match,
+                                probability: prediction.success_probability,
+                                recommendation: prediction.recommendation
+                            });
+                        }
+                    } catch (error) {
+                        console.error(`Erro na predição para match ${i}:`, error);
+                    }
+
+                    // Atualizar a lista progressivamente a cada 10 análises para melhor performance
+                    if (i % 10 === 0 && allMatches.length > 0) {
+                        const sortedMatches = [...allMatches].sort((a, b) => b.probability - a.probability);
+                        displayMatches(sortedMatches);
+                    }
+                }
+
+                progressFill.style.width = '100%';
+                
+                // Ordenar por probabilidade (maior primeiro)
+                allMatches.sort((a, b) => b.probability - a.probability);
+                
+                // Aplicar filtro atual se houver
+                applyCurrentFilter();
+                updateStatistics();
+
+                setTimeout(() => {
+                    progressBar.style.display = 'none';
+                }, 500);
+
+            } catch (error) {
+                console.error('Erro ao carregar matches:', error);
+                matchesList.innerHTML = `
+                    <div class="empty-state">
+                        <h3>❌ Erro</h3>
+                        <p>Não foi possível carregar os matches: ${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.innerHTML = '<span>🔄</span> Recarregar Matches';
+            }
+        }
+
+        function displayMatches(matches) {
+            const matchesList = document.getElementById('matchesList');
+            
+            if (!matches || matches.length === 0) {
+                matchesList.innerHTML = `
+                    <div class="empty-state">
+                        <h3>🔍 Nenhum resultado</h3>
+                        <p>${currentFilter ? 'Nenhum match encontrado com os filtros aplicados.' : 'Carregue os matches para começar a análise.'}</p>
+                    </div>
+                `;
+                document.getElementById('matchCount').textContent = '0 matches';
+                return;
+            }
+
+            document.getElementById('matchCount').textContent = `${matches.length} matches`;
+
+            matchesList.innerHTML = matches.map(match => {
+                const percentage = Math.round((match.probability || 0) * 100);
+                let percentageClass = 'percentage-low';
+                let statusClass = 'status-pending';
+
+                if (percentage >= 70) percentageClass = 'percentage-high';
+                else if (percentage >= 30) percentageClass = 'percentage-medium';
+
+                if (match.situacao?.toLowerCase().includes('aprov')) statusClass = 'status-approved';
+                else if (match.situacao?.toLowerCase().includes('rejeit')) statusClass = 'status-rejected';
+
+                return `
+                    <div class="match-item" onclick="showMatchDetails('${match.vaga_id}', '${match.candidato_id}')">
+                        <div class="match-percentage ${percentageClass}">
+                            ${percentage}%
+                        </div>
+                        <div class="match-details">
+                            <div class="match-job">${match.titulo_vaga || 'Vaga não informada'}</div>
+                            <div class="match-candidate">${match.nome_candidato || 'Candidato não informado'}</div>
+                            <div class="match-info">Vaga ID: ${match.vaga_id} | Candidato ID: ${match.candidato_id}</div>
+                        </div>
+                        <div class="match-status ${statusClass}">
+                            ${match.situacao || 'Pendente'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateStatistics() {
+            const total = allMatches.length;
+            const highMatches = allMatches.filter(m => (m.probability || 0) >= 0.7).length;
+            const averageScore = total > 0 ? 
+                Math.round(allMatches.reduce((sum, m) => sum + ((m.probability || 0) * 100), 0) / total) : 0;
+
+            document.getElementById('totalMatches').textContent = total;
+            document.getElementById('highMatches').textContent = highMatches;
+            document.getElementById('averageScore').textContent = `${averageScore}%`;
+        }
+
+        function filterMatches() {
+            const filterInput = document.getElementById('filterInput');
+            const clearButton = document.getElementById('clearFilter');
+            const filter = filterInput.value.toLowerCase().trim();
+            
+            currentFilter = filter;
+            
+            // Mostrar/ocultar botão de limpar
+            if (filter) {
+                clearButton.style.display = 'inline-block';
+            } else {
+                clearButton.style.display = 'none';
+            }
+            
+            applyCurrentFilter();
+        }
+
+        function applyCurrentFilter() {
+            if (!currentFilter) {
+                displayMatches(allMatches);
+                return;
+            }
+
+            const filtered = allMatches.filter(match => {
+                const jobTitle = (match.titulo_vaga || '').toLowerCase();
+                const candidateName = (match.nome_candidato || '').toLowerCase();
+                const jobId = String(match.vaga_id || '').toLowerCase();
+                const candidateId = String(match.candidato_id || '').toLowerCase();
+                
+                return jobTitle.includes(currentFilter) ||
+                       candidateName.includes(currentFilter) ||
+                       jobId.includes(currentFilter) ||
+                       candidateId.includes(currentFilter);
+            });
+
+            displayMatches(filtered);
+        }
+
+        function clearFilter() {
+            const filterInput = document.getElementById('filterInput');
+            const clearButton = document.getElementById('clearFilter');
+            
+            filterInput.value = '';
+            currentFilter = '';
+            clearButton.style.display = 'none';
+            
+            displayMatches(allMatches);
+        }
+
+        function showMatchDetails(jobId, candidateId) {
+            const match = allMatches.find(m => m.vaga_id == jobId && m.candidato_id == candidateId);
+            if (match) {
+                const percentage = Math.round((match.probability || 0) * 100);
+                alert(`
+🎯 DETALHES DO MATCH
+
+📊 Probabilidade: ${percentage}%
+💡 Recomendação: ${match.recommendation || 'N/A'}
+
+👤 Candidato: ${match.nome_candidato || 'N/A'}
+💼 Vaga: ${match.titulo_vaga || 'N/A'}
+📋 Situação: ${match.situacao || 'Pendente'}
+
+IDs: Vaga ${jobId} | Candidato ${candidateId}
+                `);
+            }
+        }
+    </script>
+</body>
+</html>

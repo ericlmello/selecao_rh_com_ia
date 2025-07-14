@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/e178454/Desktop/partic/FIAP%20ML/selecao/mlruns/553212469289334443/250298ca46f54498ae54f02c8553ee04/artifacts
+end_time: 1751918556007
+entry_point_name: ''
+experiment_id: '553212469289334443'
+lifecycle_stage: active
+run_id: 250298ca46f54498ae54f02c8553ee04
+run_name: skittish-wasp-152
+run_uuid: 250298ca46f54498ae54f02c8553ee04
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751918553354
+status: 4
+tags: []
+user_id: e178454
