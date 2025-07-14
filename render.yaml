@@ -1,25 +1,15 @@
 services:
-  # Define o Serviço Web principal para a sua aplicação Flask
   - type: web
-    name: sistema-selecao-fiap # Pode mudar este nome
+    name: sistema-selecao-fiap
     env: python
-    plan: free # Define o plano gratuito do Render
-    
-    # Comandos de construção e inicialização
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app --timeout 120"
-    
-    # Verificação de saúde para o Render saber se a aplicação está a funcionar
     healthCheckPath: /health
-    
-    # Variáveis de ambiente
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.9 # Use a versão do Python que tem localmente
-    
-    # Define e conecta o disco persistente a este serviço
-    # A indentação aqui é crucial. 'disks' está ao mesmo nível de 'name', 'env', etc.
+        value: 3.9.9
     disks:
       - name: dados-persistentes
         mountPath: /app/persistent_data
-        sizeGB: 1 # O plano gratuito inclui 1 GB de armazenamento
+        sizeGB: 1
