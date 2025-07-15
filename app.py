@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """
 Aplicação Flask principal para o Sistema de Recomendação de Candidatos.
-Versão final com correção de inicialização e extração de dados para deploy.
+Versão final configurada para ler dados em formato JSON e pronta para deploy.
 """
 
 # --- 1. IMPORTAÇÕES PRINCIPAIS ---
@@ -129,34 +128,45 @@ class SimpleProcessor:
 def download_and_unzip_data():
     logger.info("Verificando ficheiros de dados...")
     for key, file_id in Config.GDRIVE_ZIP_FILE_IDS.items():
-        final_csv_path = Config.DATA_PATHS[key]
-        if os.path.exists(final_csv_path):
-            logger.info(f"Ficheiro '{os.path.basename(final_csv_path)}' já existe.")
+        final_json_path = Config.DATA_PATHS[key]
+        if os.path.exists(final_json_path):
+            logger.info(f"Ficheiro '{os.path.basename(final_json_path)}' já existe.")
             continue
-        logger.warning(f"Ficheiro '{os.path.basename(final_csv_path)}' não encontrado. A descarregar...")
+        logger.warning(f"Ficheiro '{os.path.basename(final_json_path)}' não encontrado. A descarregar...")
         zip_output_path = Config.ZIP_OUTPUT_PATHS[key]
         try:
             gdown.download(id=file_id, output=zip_output_path, quiet=False)
             temp_extract_dir = os.path.join(DATA_DIR, f"temp_{key}")
             with zipfile.ZipFile(zip_output_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_extract_dir)
-            found_csv = None
+            found_file = None
             for root, _, files in os.walk(temp_extract_dir):
-                for file in files:
-                    if file.endswith('.csv'):
-                        found_csv = os.path.join(root, file)
-                        break
-                if found_csv:
+                if files:
+                    found_file = os.path.join(root, files[0])
                     break
-            if not found_csv:
-                raise Exception(f"Nenhum ficheiro .csv encontrado dentro de {zip_output_path}")
-            shutil.move(found_csv, final_csv_path)
-            logger.info(f"Ficheiro '{os.path.basename(found_csv)}' movido para '{final_csv_path}'.")
+            if not found_file:
+                raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
+            shutil.move(found_file, final_json_path)
+            logger.info(f"Ficheiro '{os.path.basename(found_file)}' movido para '{final_json_path}'.")
             os.remove(zip_output_path)
             shutil.rmtree(temp_extract_dir)
         except Exception as e:
             logger.error(f"Falha ao obter dados para '{key}': {e}")
             raise
+
+def safe_load_json(file_path):
+    """Carrega um ficheiro JSON, tentando diferentes formatos."""
+    try:
+        return pd.read_json(file_path, lines=True)
+    except ValueError:
+        try:
+            return pd.read_json(file_path)
+        except Exception as e:
+            logger.error(f"Falha ao carregar o ficheiro JSON '{file_path}': {e}")
+            return None
+    except FileNotFoundError:
+        logger.error(f"Arquivo não encontrado: {file_path}")
+        return None
 
 def safe_clean_text(text):
     try:
@@ -164,30 +174,14 @@ def safe_clean_text(text):
         return ''.join(char for char in str(text) if char.isprintable() or char.isspace())
     except Exception: return ""
 
-def safe_load_csv_with_surrogate_fix(file_path):
-    try:
-        return pd.read_csv(file_path, encoding='utf-8')
-    except Exception:
-        try:
-            return pd.read_csv(file_path, encoding='latin-1')
-        except Exception as e:
-            logger.error(f"Falha ao carregar {file_path}: {e}")
-            return None
-
-def clean_dataframe_surrogates(df):
-    if df is None: return None
-    for col in df.select_dtypes(include=['object']).columns:
-        df[col] = df[col].astype(str).apply(safe_clean_text)
-    return df
-
-def get_model_input_size(model_instance):
-    return getattr(model_instance, 'input_size', 201)
-
 def load_model(model_path, **kwargs):
     model_instance = RecommenderModel(**kwargs)
     model_instance.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model_instance.eval()
     return model_instance
+
+def get_model_input_size(model_instance):
+    return getattr(model_instance, 'input_size', 201)
 
 def calculate_metrics(y_true, y_pred, threshold=0.5):
     try:
@@ -226,8 +220,8 @@ def train_new_model(data_paths_config, output_model_dir, hyperparameters):
     dropout_rate = hyperparameters.get('dropout_rate', 0.2)
     tfidf_max_features = hyperparameters.get('tfidf_max_features', 100)
     try:
-        new_jobs_df = safe_load_csv_with_surrogate_fix(data_paths_config['jobs'])
-        new_applicants_df = safe_load_csv_with_surrogate_fix(data_paths_config['applicants'])
+        new_jobs_df = safe_load_json(data_paths_config['jobs'])
+        new_applicants_df = safe_load_json(data_paths_config['applicants'])
         if any(df is None for df in [new_jobs_df, new_applicants_df]):
             raise Exception("Falha ao carregar novos dados para retreino.")
         temp_processor = SimpleProcessor()
@@ -263,9 +257,9 @@ def initialize_components():
     download_and_unzip_data()
     try:
         logger.info("Inicializando componentes...")
-        jobs_df = safe_load_csv_with_surrogate_fix(Config.DATA_PATHS['jobs'])
-        prospects_df = safe_load_csv_with_surrogate_fix(Config.DATA_PATHS['prospects'])
-        applicants_df = safe_load_csv_with_surrogate_fix(Config.DATA_PATHS['applicants'])
+        jobs_df = safe_load_json(Config.DATA_PATHS['jobs'])
+        prospects_df = safe_load_json(Config.DATA_PATHS['prospects'])
+        applicants_df = safe_load_json(Config.DATA_PATHS['applicants'])
         if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
              raise ValueError("Um ou mais dataframes estão vazios ou não foram carregados.")
         processor = SimpleProcessor()
@@ -465,7 +459,7 @@ def create_dummy_files_if_needed():
         torch.save(dummy_model.state_dict(), Config.MODEL_PATH)
         logger.warning(f"Modelo dummy criado em: {Config.MODEL_PATH}")
     if not os.path.exists(Config.DATA_PATHS['jobs']):
-        # Adicione aqui a lógica para criar ficheiros CSV dummy se necessário
+        # Adicione aqui a lógica para criar ficheiros JSON dummy se necessário
         logger.warning("Ficheiros de dados dummy não encontrados. Crie-os ou a aplicação pode falhar.")
 
 # --- 11. INICIALIZAÇÃO DA APLICAÇÃO (ESCOPO GLOBAL) ---
