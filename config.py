@@ -2,14 +2,12 @@
 import os
 
 # --- 1. DETECÇÃO DE AMBIENTE E DEFINIÇÃO DE CAMINHOS ---
-# Detecta se está a rodar no ambiente do Render.
-# A variável 'RENDER' é definida automaticamente pela plataforma Render.
-IS_ON_RENDER = os.environ.get('RENDER') is not None
+# A forma mais robusta de encontrar o disco no Render é usar a variável de ambiente que ele fornece.
+RENDER_DISK_PATH = os.environ.get('RENDER_DISK_PATH')
 
-# Define o caminho base para todos os ficheiros.
-# No Render, usa o disco persistente montado em '/app/persistent_data'.
-# Localmente, usa o diretório atual do projeto ('.').
-BASE_PATH = '/app/persistent_data' if IS_ON_RENDER else '.'
+# Se a variável RENDER_DISK_PATH existir, usa-a como caminho base.
+# Senão (em ambiente local), usa o diretório atual ('.').
+BASE_PATH = RENDER_DISK_PATH if RENDER_DISK_PATH else '.'
 
 # Define os caminhos dinamicamente a partir do caminho base
 DATA_DIR = os.path.join(BASE_PATH, 'data')
@@ -21,7 +19,8 @@ DATABASE_PATH = os.path.join(BASE_PATH, 'predictions.db')
 # --- 2. CLASSE DE CONFIGURAÇÃO PRINCIPAL ---
 class Config:
     """
-    Classe de configuração que centraliza todos os parâmetros do projeto.
+    Classe de configuração que usa os caminhos dinâmicos definidos acima
+    e armazena os hiperparâmetros do projeto.
     """
     # --- Configuração de Dados ---
     # IDs dos ficheiros .zip no Google Drive
@@ -40,9 +39,9 @@ class Config:
     
     # Caminhos onde os ficheiros de dados estarão após a extração
     DATA_PATHS = {
-        'jobs': os.path.join(DATA_DIR, 'jobs.json'), # Alterado para .json
-        'prospects': os.path.join(DATA_DIR, 'prospects.json'), # Alterado para .json
-        'applicants': os.path.join(DATA_DIR, 'applicants.json') # Alterado para .json
+        'jobs': os.path.join(DATA_DIR, 'jobs.json'),
+        'prospects': os.path.join(DATA_DIR, 'prospects.json'),
+        'applicants': os.path.join(DATA_DIR, 'applicants.json')
     }
     
     # --- Configurações do Modelo ---
@@ -57,21 +56,17 @@ class Config:
     BATCH_SIZE = 32
 
     # --- Configurações da Aplicação ---
-    # Chave secreta para a aplicação Flask. É importante para a segurança.
     SECRET_KEY = os.environ.get('SECRET_KEY', 'uma-chave-secreta-de-desenvolvimento')
-    
-    # Ativa o modo de debug apenas em ambiente local
-    DEBUG = not IS_ON_RENDER
+    DEBUG = RENDER_DISK_PATH is None # Ativa o debug apenas se não estiver no Render
 
 
 # --- 3. CRIAÇÃO DE DIRETÓRIOS ---
 # Garante que os diretórios necessários existam assim que este ficheiro for importado.
-# Esta é uma forma limpa e segura de garantir que as pastas estão prontas.
 try:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(MODELS_DIR, exist_ok=True)
     os.makedirs(MLRUNS_DIR, exist_ok=True)
 except OSError as e:
     print(f"Erro ao criar diretórios: {e}")
-    # Em caso de erro, a aplicação irá falhar, o que é preferível a continuar
-    # com uma configuração de ficheiros incorreta.
+    raise
+
