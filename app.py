@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Aplicação Flask principal para o Sistema de Recomendação de Candidatos.
-Versão final com correção de inicialização para deploy em produção (Render).
+Versão final com correção de inicialização e extração de dados para deploy.
 """
 
 # --- 1. IMPORTAÇÕES PRINCIPAIS ---
@@ -108,11 +108,11 @@ class SimpleProcessor:
             all_texts = sample_texts.copy()
             for col in text_columns_applicants:
                 if col in applicants_df.columns:
-                    texts = applicants_df[col].dropna().astype(str).head(100)
+                    texts = applicants_df[col].dropna().astype(str)
                     all_texts.extend([safe_clean_text(t) for t in texts if t])
             for col in text_columns_jobs:
                 if col in jobs_df.columns:
-                    texts = jobs_df[col].dropna().astype(str).head(100)
+                    texts = jobs_df[col].dropna().astype(str)
                     all_texts.extend([safe_clean_text(t) for t in texts if t])
             all_texts = [t for t in all_texts if t.strip()]
             if not all_texts:
@@ -130,20 +130,33 @@ def download_and_unzip_data():
     logger.info("Verificando ficheiros de dados...")
     for key, file_id in Config.GDRIVE_ZIP_FILE_IDS.items():
         final_csv_path = Config.DATA_PATHS[key]
-        if not os.path.exists(final_csv_path):
-            logger.warning(f"Ficheiro '{os.path.basename(final_csv_path)}' não encontrado. A descarregar...")
-            zip_output_path = Config.ZIP_OUTPUT_PATHS[key]
-            try:
-                gdown.download(id=file_id, output=zip_output_path, quiet=False)
-                with zipfile.ZipFile(zip_output_path, 'r') as zip_ref:
-                    zip_ref.extractall(DATA_DIR)
-                os.remove(zip_output_path)
-                logger.info(f"Download e extração para '{key}' concluídos.")
-            except Exception as e:
-                logger.error(f"Falha ao obter dados para '{key}': {e}")
-                raise
-        else:
+        if os.path.exists(final_csv_path):
             logger.info(f"Ficheiro '{os.path.basename(final_csv_path)}' já existe.")
+            continue
+        logger.warning(f"Ficheiro '{os.path.basename(final_csv_path)}' não encontrado. A descarregar...")
+        zip_output_path = Config.ZIP_OUTPUT_PATHS[key]
+        try:
+            gdown.download(id=file_id, output=zip_output_path, quiet=False)
+            temp_extract_dir = os.path.join(DATA_DIR, f"temp_{key}")
+            with zipfile.ZipFile(zip_output_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_extract_dir)
+            found_csv = None
+            for root, _, files in os.walk(temp_extract_dir):
+                for file in files:
+                    if file.endswith('.csv'):
+                        found_csv = os.path.join(root, file)
+                        break
+                if found_csv:
+                    break
+            if not found_csv:
+                raise Exception(f"Nenhum ficheiro .csv encontrado dentro de {zip_output_path}")
+            shutil.move(found_csv, final_csv_path)
+            logger.info(f"Ficheiro '{os.path.basename(found_csv)}' movido para '{final_csv_path}'.")
+            os.remove(zip_output_path)
+            shutil.rmtree(temp_extract_dir)
+        except Exception as e:
+            logger.error(f"Falha ao obter dados para '{key}': {e}")
+            raise
 
 def safe_clean_text(text):
     try:
@@ -172,7 +185,7 @@ def get_model_input_size(model_instance):
 
 def load_model(model_path, **kwargs):
     model_instance = RecommenderModel(**kwargs)
-    model_instance.load_state_dict(torch.load(model_path))
+    model_instance.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model_instance.eval()
     return model_instance
 
@@ -466,3 +479,4 @@ if __name__ == '__main__':
         app.run(debug=True, host='127.0.0.1', port=5000)
     else:
         logger.error("Falha na inicialização. O servidor de desenvolvimento não será iniciado.")
+
