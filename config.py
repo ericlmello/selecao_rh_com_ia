@@ -73,6 +73,8 @@ def ensure_directories():
     Garante que os diretórios necessários existam.
     Função separada para melhor controle de erros.
     """
+    global BASE_PATH, DATA_DIR, MODELS_DIR, MLRUNS_DIR, DATABASE_PATH
+    
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(MODELS_DIR, exist_ok=True)
@@ -86,18 +88,21 @@ def ensure_directories():
     except Exception as e:
         print(f"Erro ao criar diretórios: {e}")
         # Em caso de erro, tenta usar diretório temporário do sistema
-        global BASE_PATH, DATA_DIR, MODELS_DIR, MLRUNS_DIR, DATABASE_PATH
         BASE_PATH = tempfile.mkdtemp()
         DATA_DIR = os.path.join(BASE_PATH, 'data')
         MODELS_DIR = os.path.join(BASE_PATH, 'models')
         MLRUNS_DIR = os.path.join(BASE_PATH, 'mlruns')
         DATABASE_PATH = os.path.join(BASE_PATH, 'predictions.db')
         
-        os.makedirs(DATA_DIR, exist_ok=True)
-        os.makedirs(MODELS_DIR, exist_ok=True)
-        os.makedirs(MLRUNS_DIR, exist_ok=True)
-        
-        print(f"Usando diretório temporário: {BASE_PATH}")
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            os.makedirs(MODELS_DIR, exist_ok=True)
+            os.makedirs(MLRUNS_DIR, exist_ok=True)
+            
+            print(f"Usando diretório temporário: {BASE_PATH}")
+        except Exception as e2:
+            print(f"Erro crítico ao criar diretórios temporários: {e2}")
+            raise
 
 # --- 4. INICIALIZAÇÃO ---
 # Chama a função para criar os diretórios
@@ -116,4 +121,3 @@ if IS_ON_RENDER:
 else:
     PORT = 5000
     print("Configuração local ativada")
-
