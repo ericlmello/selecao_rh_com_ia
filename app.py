@@ -216,7 +216,8 @@ def train_new_model(data_paths_config, output_model_dir, hyperparameters):
 # --- 8. FUNÇÃO DE INICIALIZAÇÃO PRINCIPAL ---
 def initialize_components():
     global processor, model, jobs_df, prospects_df, applicants_df
-    download_and_process_data()
+    # CORREÇÃO: Chamando a função com o nome correto.
+    download_and_unzip_data()
     try:
         logger.info("Inicializando componentes com amostragem de dados...")
         
