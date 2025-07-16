@@ -1,22 +1,34 @@
 """
-Este script lê os ficheiros JSON brutos e grandes, processa-os para um formato
-de tabela limpo e cria uma amostra pequena e otimizada para ser usada em
-ambientes com memória limitada, como o Render.
+Este script automatiza todo o processo de criação de dados para a aplicação:
+1. Descarrega os ficheiros de dados brutos (.zip) do Google Drive.
+2. Extrai os ficheiros JSON aninhados.
+3. Processa e "achata" os dados JSON para um formato de tabela limpo.
+4. Cria uma amostra pequena e otimizada desses dados.
+5. Salva a amostra final, pronta para ser usada pela aplicação.
 """
 
 import os
 import pandas as pd
 import json
+import gdown
+import zipfile
+import shutil
 
 # --- CONFIGURAÇÕES ---
 # Define o número de registos de "prospects" que queremos na nossa amostra final.
 SAMPLE_SIZE = 500
 
-# Define os nomes das pastas de origem (com os ficheiros grandes) e de destino (com a amostra).
-SOURCE_DATA_FOLDER = 'data_original'
+# Define a pasta de destino para a amostra final.
 DESTINATION_DATA_FOLDER = 'data'
 
-# --- FUNÇÕES DE PROCESSAMENTO (do seu script original) ---
+# IDs dos ficheiros .zip no Google Drive
+GDRIVE_ZIP_FILE_IDS = {
+    'applicants': '1Z0dOk8FMjazQo03PuUeNGZOW-rxtpzmO',
+    'prospects': '17RkgTlckZ6ItDqgsDCT8H5HZn_OwmxQO',
+    'jobs': '1h8Lk5LM8VE5TF80mngCcbsQ14qA2rbw_'
+}
+
+# --- FUNÇÕES DE PROCESSAMENTO ---
 
 def carregar_json_bruto(caminho):
     """Carrega um ficheiro JSON bruto."""
@@ -88,24 +100,37 @@ if __name__ == "__main__":
     print("INICIANDO SCRIPT DE CRIAÇÃO DE AMOSTRA DE DADOS")
     print("="*50)
 
-    # Verifica se a pasta de origem existe
-    if not os.path.exists(SOURCE_DATA_FOLDER):
-        print(f"\nERRO: A pasta de origem '{SOURCE_DATA_FOLDER}' não foi encontrada.")
-        print("Por favor, crie esta pasta e coloque os seus ficheiros JSON grandes dentro dela.")
-        exit()
-
-    # Cria a pasta de destino se não existir
     os.makedirs(DESTINATION_DATA_FOLDER, exist_ok=True)
+    temp_dir = "temp_download"
+    os.makedirs(temp_dir, exist_ok=True)
 
-    # 1. Carrega e processa todos os ficheiros
-    print("\n[PASSO 1 de 3] Processando ficheiros JSON brutos...")
-    raw_jobs = carregar_json_bruto(os.path.join(SOURCE_DATA_FOLDER, 'jobs.json'))
-    raw_prospects = carregar_json_bruto(os.path.join(SOURCE_DATA_FOLDER, 'prospects.json'))
-    raw_applicants = carregar_json_bruto(os.path.join(SOURCE_DATA_FOLDER, 'applicants.json'))
+    # 1. Descarrega, extrai e processa todos os ficheiros
+    print("\n[PASSO 1 de 3] Descarregando e processando ficheiros JSON brutos...")
+    
+    raw_data_map = {}
+    process_map = {
+        'jobs': processar_jobs,
+        'prospects': processar_prospects,
+        'applicants': processar_applicants
+    }
 
-    df_jobs_full = processar_jobs(raw_jobs)
-    df_prospects_full = processar_prospects(raw_prospects)
-    df_applicants_full = processar_applicants(raw_applicants)
+    for key, file_id in GDRIVE_ZIP_FILE_IDS.items():
+        zip_path = os.path.join(temp_dir, f"{key}.zip")
+        print(f"\n-> Descarregando '{key}.zip'...")
+        gdown.download(id=file_id, output=zip_path, quiet=False)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Assumindo que cada zip contém um único ficheiro json
+            json_filename = zip_ref.namelist()[0]
+            zip_ref.extract(json_filename, path=temp_dir)
+            raw_json_path = os.path.join(temp_dir, json_filename)
+        
+        raw_data = carregar_json_bruto(raw_json_path)
+        raw_data_map[key] = process_map[key](raw_data)
+
+    df_jobs_full = raw_data_map['jobs']
+    df_prospects_full = raw_data_map['prospects']
+    df_applicants_full = raw_data_map['applicants']
     print("  -> Ficheiros processados com sucesso!")
 
     # 2. Cria a amostra
@@ -131,6 +156,9 @@ if __name__ == "__main__":
     df_jobs_sample.to_json(output_paths['jobs'], orient='records', lines=True, force_ascii=False)
     df_prospects_sample.to_json(output_paths['prospects'], orient='records', lines=True, force_ascii=False)
     df_applicants_sample.to_json(output_paths['applicants'], orient='records', lines=True, force_ascii=False)
+    
+    # Limpa a pasta temporária
+    shutil.rmtree(temp_dir)
     
     print(f"  -> Ficheiros salvos na pasta '{DESTINATION_DATA_FOLDER}'!")
     print("\n" + "="*50)
