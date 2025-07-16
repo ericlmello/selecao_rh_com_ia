@@ -39,13 +39,8 @@ except ImportError:
     DATA_DIR = 'data'
 
 # --- 4. CONFIGURAÇÃO DE LOGGING E MLFLOW ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler('app.log', encoding='utf-8'), logging.StreamHandler(sys.stdout)]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler('app.log', encoding='utf-8'), logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger(__name__)
-
 try:
     mlflow.set_tracking_uri(f"file://{MLRUNS_DIR}")
 except Exception as e:
@@ -140,17 +135,26 @@ def download_and_unzip_data():
 
 def safe_load_json_optimized(file_path, columns_to_keep):
     try:
-        logger.info(f"Carregando '{file_path}' de forma otimizada...")
+        logger.info(f"Tentando carregar '{os.path.basename(file_path)}' como JSON-Lines (otimizado)...")
         json_reader = pd.read_json(file_path, lines=True, chunksize=10000)
-        chunks = []
-        for chunk in json_reader:
-            cols_in_chunk = [col for col in columns_to_keep if col in chunk.columns]
-            chunks.append(chunk[cols_in_chunk])
+        chunks = [chunk[[col for col in columns_to_keep if col in chunk.columns]] for chunk in json_reader]
+        if not chunks: raise ValueError("Ficheiro JSON-Lines vazio ou inválido.")
         df = pd.concat(chunks, ignore_index=True)
-        logger.info(f"'{file_path}' carregado com sucesso. {len(df)} linhas e {len(df.columns)} colunas.")
+        logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON-Lines.")
         return df
-    except Exception as e:
-        logger.error(f"Falha ao carregar o ficheiro JSON de forma otimizada '{file_path}': {e}")
+    except (ValueError, TypeError):
+        logger.warning(f"Falha ao carregar como JSON-Lines. Tentando como JSON padrão...")
+        try:
+            df_full = pd.read_json(file_path)
+            cols_to_keep_final = [col for col in columns_to_keep if col in df_full.columns]
+            df = df_full[cols_to_keep_final]
+            logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON padrão.")
+            return df
+        except Exception as e2:
+            logger.error(f"Falha ao carregar o ficheiro JSON '{os.path.basename(file_path)}' em ambos os formatos: {e2}")
+            return None
+    except FileNotFoundError:
+        logger.error(f"Arquivo não encontrado: {file_path}")
         return None
 
 def safe_clean_text(text):
@@ -397,6 +401,7 @@ def trigger_retraining():
 @app.route('/jobs')
 def get_jobs():
     try:
+        if jobs_df is None: return jsonify({'error': 'Dados de vagas não carregados.'}), 500
         vagas_com_prospects = prospects_df['vaga_id'].astype(str).unique()
         jobs_filtered = jobs_df[jobs_df['vaga_id'].astype(str).isin(vagas_com_prospects)]
         return jsonify(jobs_filtered[['vaga_id', 'titulo_vaga', 'cliente']].head(500).to_dict(orient='records'))
@@ -406,6 +411,7 @@ def get_jobs():
 @app.route('/candidates')
 def get_candidates():
     try:
+        if applicants_df is None: return jsonify({'error': 'Dados de candidatos não carregados.'}), 500
         candidatos_com_prospects = prospects_df['codigo'].astype(str).unique()
         candidates_filtered = applicants_df[applicants_df['candidato_id'].astype(str).isin(candidatos_com_prospects)]
         return jsonify(candidates_filtered[['candidato_id', 'nome', 'cargo_atual']].head(500).to_dict(orient='records'))
