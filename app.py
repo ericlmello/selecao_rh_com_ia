@@ -13,7 +13,7 @@ import sqlite3
 import shutil
 import traceback
 import zipfile
-import gc # Importa o Garbage Collector
+import gc
 from datetime import datetime
 
 # --- 2. IMPORTAÇÕES DE BIBLIOTECAS DE DADOS E ML ---
@@ -106,78 +106,87 @@ class SimpleProcessor:
             self.vectorizers['text'].fit(sample_texts)
 
 # --- 7. FUNÇÕES AUXILIARES ---
-def download_and_unzip_data():
-    logger.info("Verificando ficheiros de dados...")
+
+def carregar_json_bruto(caminho):
+    with open(caminho, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def processar_jobs(data):
+    records = []
+    for vaga_id, conteudo in data.items():
+        info = conteudo.get('informacoes_basicas', {})
+        perfil = conteudo.get('perfil_vaga', {})
+        record = {'vaga_id': vaga_id, 'data_requisicao': info.get('data_requicisao'), 'limite_contratacao': info.get('limite_esperado_para_contratacao'), 'titulo_vaga': info.get('titulo_vaga'), 'cliente': info.get('cliente'), 'solicitante_cliente': info.get('solicitante_cliente'), 'empresa_divisao': info.get('empresa_divisao'), 'analista_responsavel': info.get('analista_responsavel'), 'tipo_contratacao': info.get('tipo_contratacao'), 'pais': perfil.get('pais'), 'estado': perfil.get('estado'), 'cidade': perfil.get('cidade')}
+        records.append(record)
+    return pd.DataFrame(records)
+
+def processar_prospects(data):
+    records = []
+    for vaga_id, conteudo in data.items():
+        lista = conteudo.get('prospects', [])
+        for item in lista:
+            record = {'vaga_id': vaga_id}
+            record.update(item)
+            records.append(record)
+    return pd.DataFrame(records)
+
+def processar_applicants(data):
+    records = []
+    for candidato_id, conteudo in data.items():
+        infos_basicas = conteudo.get('infos_basicas', {})
+        info_pessoais = conteudo.get('informacoes_pessoais', {})
+        info_profissionais = conteudo.get('informacoes_profissionais', {})
+        formacao_idiomas = conteudo.get('formacao_e_idiomas', {})
+        record = {'candidato_id': candidato_id, 'cargo_atual': conteudo.get('cargo_atual'), 'nome': infos_basicas.get('nome'), 'email': infos_basicas.get('email'), 'telefone': infos_basicas.get('telefone'), 'idade': info_pessoais.get('idade'), 'cidade': info_pessoais.get('cidade'), 'estado': info_pessoais.get('estado'), 'nacionalidade': info_pessoais.get('nacionalidade'), 'estado_civil': info_pessoais.get('estado_civil'), 'experiencia_anos': info_profissionais.get('experiencia_total_anos'), 'ultimo_cargo': info_profissionais.get('ultimo_cargo'), 'ultima_empresa': info_profissionais.get('ultima_empresa'), 'setor_atuacao': info_profissionais.get('setor_atuacao'), 'nivel_educacao': formacao_idiomas.get('nivel_educacao'), 'curso': formacao_idiomas.get('curso'), 'instituicao': formacao_idiomas.get('instituicao'), 'idiomas': formacao_idiomas.get('idiomas'), 'habilidades': conteudo.get('habilidades')}
+        records.append(record)
+    return pd.DataFrame(records)
+
+def download_and_process_data():
+    logger.info("Verificando e processando ficheiros de dados...")
     for key, file_id in Config.GDRIVE_ZIP_FILE_IDS.items():
         final_json_path = Config.DATA_PATHS[key]
         if os.path.exists(final_json_path):
-            logger.info(f"Ficheiro '{os.path.basename(final_json_path)}' já existe.")
+            logger.info(f"Ficheiro processado '{os.path.basename(final_json_path)}' já existe.")
             continue
-        logger.warning(f"Ficheiro '{os.path.basename(final_json_path)}' não encontrado. A descarregar...")
+        logger.warning(f"Ficheiro '{os.path.basename(final_json_path)}' não encontrado. A descarregar e processar...")
         zip_output_path = Config.ZIP_OUTPUT_PATHS[key]
         try:
             gdown.download(id=file_id, output=zip_output_path, quiet=False)
             temp_extract_dir = os.path.join(DATA_DIR, f"temp_{key}")
             with zipfile.ZipFile(zip_output_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_extract_dir)
-            found_file = None
+            raw_json_file = None
             for root, _, files in os.walk(temp_extract_dir):
                 if files:
-                    found_file = os.path.join(root, files[0])
+                    raw_json_file = os.path.join(root, files[0])
                     break
-            if not found_file: raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
-            shutil.move(found_file, final_json_path)
-            logger.info(f"Ficheiro '{os.path.basename(found_file)}' movido para '{final_json_path}'.")
+            if not raw_json_file: raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
+            logger.info(f"Processando ficheiro JSON bruto: {raw_json_file}")
+            raw_data = carregar_json_bruto(raw_json_file)
+            df_processado = None
+            if key == 'jobs': df_processado = processar_jobs(raw_data)
+            elif key == 'prospects': df_processado = processar_prospects(raw_data)
+            elif key == 'applicants': df_processado = processar_applicants(raw_data)
+            if df_processado is None: raise Exception(f"Falha ao processar o ficheiro para a chave '{key}'")
+            df_processado.to_json(final_json_path, orient='records', lines=True, force_ascii=False)
+            logger.info(f"Ficheiro processado e salvo em: '{final_json_path}'")
             os.remove(zip_output_path)
             shutil.rmtree(temp_extract_dir)
         except Exception as e:
-            logger.error(f"Falha ao obter dados para '{key}': {e}")
+            logger.error(f"Falha ao obter e processar dados para '{key}': {e}")
             raise
 
-def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None, sample_size=None):
-    """
-    Carrega um ficheiro JSON de forma otimizada e robusta, lidando com estruturas aninhadas.
-    """
-    df = None
+def safe_load_processed_json(file_path, columns_to_keep, dtype_map=None, sample_size=None):
     try:
-        logger.info(f"Lendo o ficheiro JSON bruto: '{os.path.basename(file_path)}'")
-        with open(file_path, 'r', encoding='utf-8') as f:
-            raw_data = json.load(f)
-        
-        # Tenta normalizar a estrutura JSON para uma tabela plana
-        df = pd.json_normalize(raw_data)
-        logger.info(f"Ficheiro '{os.path.basename(file_path)}' normalizado com sucesso.")
-
-    except (json.JSONDecodeError, AttributeError):
-        # Fallback se a normalização falhar ou não for necessária (ex: JSON Lines)
-        logger.warning(f"Falha na normalização. Tentando carregar como JSON-Lines...")
-        try:
-            df = pd.read_json(file_path, lines=True, dtype=dtype_map)
-        except Exception as e:
-            logger.error(f"Falha ao carregar o ficheiro JSON '{os.path.basename(file_path)}': {e}")
-            return None
-    except FileNotFoundError:
-        logger.error(f"Arquivo não encontrado: {file_path}")
-        return None
-
-    if df.empty:
-        logger.warning(f"DataFrame '{os.path.basename(file_path)}' está vazio após o carregamento.")
+        df = pd.read_json(file_path, lines=True, dtype=dtype_map)
+        actual_cols = [col for col in columns_to_keep if col in df.columns]
+        df = df[actual_cols]
+        if sample_size and len(df) > sample_size:
+            df = df.head(sample_size)
         return df
-
-    # Filtra apenas as colunas necessárias
-    actual_cols_to_keep = [col for col in columns_to_keep if col in df.columns]
-    if len(actual_cols_to_keep) < len(columns_to_keep):
-        missing_cols = set(columns_to_keep) - set(actual_cols_to_keep)
-        logger.warning(f"Colunas esperadas ausentes no ficheiro '{os.path.basename(file_path)}': {missing_cols}")
-    
-    df = df[actual_cols_to_keep]
-
-    # Aplica a amostragem se especificada
-    if sample_size and len(df) > sample_size:
-        logger.info(f"Reduzindo DataFrame de {len(df)} para uma amostra de {sample_size} registros.")
-        df = df.head(sample_size)
-
-    return df
+    except Exception as e:
+        logger.error(f"Falha ao carregar o ficheiro JSON processado '{file_path}': {e}")
+        return None
 
 def safe_clean_text(text):
     try:
@@ -231,8 +240,8 @@ def train_new_model(data_paths_config, output_model_dir, hyperparameters):
     dropout_rate = hyperparameters.get('dropout_rate', 0.2)
     tfidf_max_features = hyperparameters.get('tfidf_max_features', 100)
     try:
-        new_jobs_df = safe_load_json_optimized(data_paths_config['jobs'], ['vaga_id', 'titulo_vaga', 'descricao'])
-        new_applicants_df = safe_load_json_optimized(data_paths_config['applicants'], ['candidato_id', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades'])
+        new_jobs_df = safe_load_processed_json(data_paths_config['jobs'], ['vaga_id', 'titulo_vaga', 'descricao'])
+        new_applicants_df = safe_load_processed_json(data_paths_config['applicants'], ['candidato_id', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades'])
         if any(df is None for df in [new_jobs_df, new_applicants_df]):
             raise Exception("Falha ao carregar novos dados para retreino.")
         temp_processor = SimpleProcessor()
@@ -265,16 +274,16 @@ def train_new_model(data_paths_config, output_model_dir, hyperparameters):
 # --- 8. FUNÇÃO DE INICIALIZAÇÃO PRINCIPAL ---
 def initialize_components():
     global processor, model, jobs_df, prospects_df, applicants_df
-    download_and_unzip_data()
+    download_and_process_data()
     try:
-        logger.info("Inicializando componentes com amostragem de dados...")
+        logger.info("Inicializando componentes com dados processados e amostrados...")
         
         SAMPLE_SIZE = 500
         
         prospects_cols = ['vaga_id', 'codigo', 'situacao_candidado']
         prospects_dtypes = {'vaga_id': 'str', 'codigo': 'str', 'situacao_candidado': 'category'}
         
-        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes, sample_size=SAMPLE_SIZE)
+        prospects_df = safe_load_processed_json(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes, sample_size=SAMPLE_SIZE)
         if prospects_df is None or prospects_df.empty:
             raise ValueError("Não foi possível carregar a amostra de prospects.")
         logger.info(f"Amostra de {len(prospects_df)} prospects carregada.")
@@ -284,11 +293,11 @@ def initialize_components():
         
         jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
         jobs_dtypes = {'vaga_id': 'str', 'cliente': 'category'}
-        full_jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
+        full_jobs_df = safe_load_processed_json(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
         
         applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
         applicants_dtypes = {'candidato_id': 'str', 'cargo_atual': 'category'}
-        full_applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
+        full_applicants_df = safe_load_processed_json(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
 
         if full_jobs_df is None or full_applicants_df is None:
             raise ValueError("Falha ao carregar os dataframes completos de jobs ou applicants.")
@@ -298,8 +307,7 @@ def initialize_components():
         
         logger.info(f"Dados filtrados: {len(jobs_df)} vagas, {len(applicants_df)} candidatos.")
         
-        del full_jobs_df
-        del full_applicants_df
+        del full_jobs_df, full_applicants_df
         gc.collect()
         
         if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
