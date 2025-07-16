@@ -134,7 +134,10 @@ def download_and_unzip_data():
             logger.error(f"Falha ao obter dados para '{key}': {e}")
             raise
 
-def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None):
+def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None, sample_size=None):
+    """
+    Carrega um ficheiro JSON de forma otimizada, com opção de amostragem.
+    """
     try:
         logger.info(f"Tentando carregar '{os.path.basename(file_path)}' como JSON-Lines (otimizado)...")
         json_reader = pd.read_json(file_path, lines=True, chunksize=10000, dtype=dtype_map)
@@ -142,21 +145,26 @@ def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None):
         if not chunks: raise ValueError("Ficheiro JSON-Lines vazio ou inválido.")
         df = pd.concat(chunks, ignore_index=True)
         logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON-Lines.")
-        return df
     except (ValueError, TypeError):
         logger.warning(f"Falha ao carregar como JSON-Lines. Tentando como JSON padrão...")
         try:
-            df_full = pd.read_json(file_path, dtype=dtype_map)
-            cols_to_keep_final = [col for col in columns_to_keep if col in df_full.columns]
-            df = df_full[cols_to_keep_final]
+            df = pd.read_json(file_path, dtype=dtype_map)
+            cols_to_keep_final = [col for col in columns_to_keep if col in df.columns]
+            df = df[cols_to_keep_final]
             logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON padrão.")
-            return df
         except Exception as e2:
             logger.error(f"Falha ao carregar o ficheiro JSON '{os.path.basename(file_path)}' em ambos os formatos: {e2}")
             return None
     except FileNotFoundError:
         logger.error(f"Arquivo não encontrado: {file_path}")
         return None
+    
+    # Aplica a amostragem se especificada
+    if sample_size and len(df) > sample_size:
+        logger.info(f"Reduzindo DataFrame de {len(df)} para uma amostra de {sample_size} registros.")
+        df = df.head(sample_size)
+
+    return df
 
 def safe_clean_text(text):
     try:
@@ -246,25 +254,51 @@ def initialize_components():
     global processor, model, jobs_df, prospects_df, applicants_df
     download_and_unzip_data()
     try:
-        logger.info("Inicializando componentes...")
-        jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
+        logger.info("Inicializando componentes com amostragem de dados...")
+        
+        SAMPLE_SIZE = 500
+        
         prospects_cols = ['vaga_id', 'codigo', 'situacao_candidado']
-        applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
-        jobs_dtypes = {'vaga_id': 'str', 'cliente': 'category'}
         prospects_dtypes = {'vaga_id': 'str', 'codigo': 'str', 'situacao_candidado': 'category'}
+        
+        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes, sample_size=SAMPLE_SIZE)
+        if prospects_df is None or prospects_df.empty:
+            raise ValueError("Não foi possível carregar a amostra de prospects.")
+        logger.info(f"Amostra de {len(prospects_df)} prospects carregada.")
+
+        valid_job_ids = prospects_df['vaga_id'].unique()
+        valid_candidate_ids = prospects_df['codigo'].unique()
+        
+        jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
+        jobs_dtypes = {'vaga_id': 'str', 'cliente': 'category'}
+        full_jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
+        
+        applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
         applicants_dtypes = {'candidato_id': 'str', 'cargo_atual': 'category'}
-        jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
-        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes)
-        applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
-        if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
-             raise ValueError("Um ou mais dataframes estão vazios ou não foram carregados.")
+        full_applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
+
+        if full_jobs_df is None or full_applicants_df is None:
+            raise ValueError("Falha ao carregar os dataframes completos de jobs ou applicants.")
+
+        jobs_df = full_jobs_df[full_jobs_df['vaga_id'].astype(str).isin(valid_job_ids)]
+        applicants_df = full_applicants_df[full_applicants_df['candidato_id'].astype(str).isin(valid_candidate_ids)]
+        
+        logger.info(f"Dados filtrados: {len(jobs_df)} vagas, {len(applicants_df)} candidatos.")
+        
+        del full_jobs_df
+        del full_applicants_df
         gc.collect()
+        
+        if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
+             raise ValueError("Um ou mais dataframes estão vazios após a amostragem e filtragem.")
+        
         processor = SimpleProcessor()
         processor.initialize_text_vectorizers(applicants_df, jobs_df)
         model = load_model(Config.MODEL_PATH, hidden_layer_1_size=Config.HIDDEN_SIZE, hidden_layer_2_size=Config.HIDDEN_SIZE//2)
         input_size = get_model_input_size(model)
         processor.scaler = MinMaxScaler()
         processor.scaler.fit(np.random.rand(10, input_size))
+        
         logger.info("Componentes inicializados com sucesso!")
         return True
     except Exception as e:
