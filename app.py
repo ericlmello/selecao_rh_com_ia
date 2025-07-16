@@ -13,6 +13,7 @@ import sqlite3
 import shutil
 import traceback
 import zipfile
+import gc # Importa o Garbage Collector
 from datetime import datetime
 
 # --- 2. IMPORTAÇÕES DE BIBLIOTECAS DE DADOS E ML ---
@@ -133,10 +134,10 @@ def download_and_unzip_data():
             logger.error(f"Falha ao obter dados para '{key}': {e}")
             raise
 
-def safe_load_json_optimized(file_path, columns_to_keep):
+def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None):
     try:
         logger.info(f"Tentando carregar '{os.path.basename(file_path)}' como JSON-Lines (otimizado)...")
-        json_reader = pd.read_json(file_path, lines=True, chunksize=10000)
+        json_reader = pd.read_json(file_path, lines=True, chunksize=10000, dtype=dtype_map)
         chunks = [chunk[[col for col in columns_to_keep if col in chunk.columns]] for chunk in json_reader]
         if not chunks: raise ValueError("Ficheiro JSON-Lines vazio ou inválido.")
         df = pd.concat(chunks, ignore_index=True)
@@ -145,7 +146,7 @@ def safe_load_json_optimized(file_path, columns_to_keep):
     except (ValueError, TypeError):
         logger.warning(f"Falha ao carregar como JSON-Lines. Tentando como JSON padrão...")
         try:
-            df_full = pd.read_json(file_path)
+            df_full = pd.read_json(file_path, dtype=dtype_map)
             cols_to_keep_final = [col for col in columns_to_keep if col in df_full.columns]
             df = df_full[cols_to_keep_final]
             logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON padrão.")
@@ -249,11 +250,15 @@ def initialize_components():
         jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
         prospects_cols = ['vaga_id', 'codigo', 'situacao_candidado']
         applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
-        jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols)
-        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols)
-        applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols)
+        jobs_dtypes = {'vaga_id': 'str', 'cliente': 'category'}
+        prospects_dtypes = {'vaga_id': 'str', 'codigo': 'str', 'situacao_candidado': 'category'}
+        applicants_dtypes = {'candidato_id': 'str', 'cargo_atual': 'category'}
+        jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
+        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes)
+        applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
         if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
              raise ValueError("Um ou mais dataframes estão vazios ou não foram carregados.")
+        gc.collect()
         processor = SimpleProcessor()
         processor.initialize_text_vectorizers(applicants_df, jobs_df)
         model = load_model(Config.MODEL_PATH, hidden_layer_1_size=Config.HIDDEN_SIZE, hidden_layer_2_size=Config.HIDDEN_SIZE//2)
