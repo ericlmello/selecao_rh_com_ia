@@ -135,33 +135,48 @@ def download_and_unzip_data():
             raise
 
 def safe_load_json_optimized(file_path, columns_to_keep, dtype_map=None, sample_size=None):
+    """
+    Carrega um ficheiro JSON de forma otimizada e robusta, lidando com estruturas aninhadas.
+    """
     df = None
     try:
-        logger.info(f"Tentando carregar '{os.path.basename(file_path)}' como JSON-Lines...")
-        df = pd.read_json(file_path, lines=True, dtype=dtype_map)
-        logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON-Lines.")
-    except (ValueError, TypeError):
-        logger.warning(f"Falha ao carregar como JSON-Lines. Tentando como JSON padrão...")
+        logger.info(f"Lendo o ficheiro JSON bruto: '{os.path.basename(file_path)}'")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+        
+        # Tenta normalizar a estrutura JSON para uma tabela plana
+        df = pd.json_normalize(raw_data)
+        logger.info(f"Ficheiro '{os.path.basename(file_path)}' normalizado com sucesso.")
+
+    except (json.JSONDecodeError, AttributeError):
+        # Fallback se a normalização falhar ou não for necessária (ex: JSON Lines)
+        logger.warning(f"Falha na normalização. Tentando carregar como JSON-Lines...")
         try:
-            df = pd.read_json(file_path, dtype=dtype_map)
-            logger.info(f"'{os.path.basename(file_path)}' carregado com sucesso como JSON padrão.")
+            df = pd.read_json(file_path, lines=True, dtype=dtype_map)
         except Exception as e:
-            logger.error(f"Falha ao carregar o ficheiro JSON '{os.path.basename(file_path)}' em ambos os formatos: {e}")
+            logger.error(f"Falha ao carregar o ficheiro JSON '{os.path.basename(file_path)}': {e}")
             return None
     except FileNotFoundError:
         logger.error(f"Arquivo não encontrado: {file_path}")
         return None
+
     if df.empty:
         logger.warning(f"DataFrame '{os.path.basename(file_path)}' está vazio após o carregamento.")
         return df
+
+    # Filtra apenas as colunas necessárias
     actual_cols_to_keep = [col for col in columns_to_keep if col in df.columns]
     if len(actual_cols_to_keep) < len(columns_to_keep):
         missing_cols = set(columns_to_keep) - set(actual_cols_to_keep)
         logger.warning(f"Colunas esperadas ausentes no ficheiro '{os.path.basename(file_path)}': {missing_cols}")
+    
     df = df[actual_cols_to_keep]
+
+    # Aplica a amostragem se especificada
     if sample_size and len(df) > sample_size:
         logger.info(f"Reduzindo DataFrame de {len(df)} para uma amostra de {sample_size} registros.")
         df = df.head(sample_size)
+
     return df
 
 def safe_clean_text(text):
