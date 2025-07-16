@@ -1,6 +1,6 @@
 """
 Aplicação Flask principal para o Sistema de Recomendação de Candidatos.
-Versão final configurada para ler dados em formato JSON e pronta para deploy.
+
 """
 
 # --- 1. IMPORTAÇÕES PRINCIPAIS ---
@@ -138,15 +138,20 @@ def download_and_unzip_data():
             logger.error(f"Falha ao obter dados para '{key}': {e}")
             raise
 
-def safe_load_json(file_path):
+def safe_load_json_optimized(file_path, columns_to_keep):
     try:
-        return pd.read_json(file_path, lines=True)
-    except Exception:
-        try:
-            return pd.read_json(file_path)
-        except Exception as e:
-            logger.error(f"Falha ao carregar o ficheiro JSON '{file_path}': {e}")
-            return None
+        logger.info(f"Carregando '{file_path}' de forma otimizada...")
+        json_reader = pd.read_json(file_path, lines=True, chunksize=10000)
+        chunks = []
+        for chunk in json_reader:
+            cols_in_chunk = [col for col in columns_to_keep if col in chunk.columns]
+            chunks.append(chunk[cols_in_chunk])
+        df = pd.concat(chunks, ignore_index=True)
+        logger.info(f"'{file_path}' carregado com sucesso. {len(df)} linhas e {len(df.columns)} colunas.")
+        return df
+    except Exception as e:
+        logger.error(f"Falha ao carregar o ficheiro JSON de forma otimizada '{file_path}': {e}")
+        return None
 
 def safe_clean_text(text):
     try:
@@ -200,8 +205,8 @@ def train_new_model(data_paths_config, output_model_dir, hyperparameters):
     dropout_rate = hyperparameters.get('dropout_rate', 0.2)
     tfidf_max_features = hyperparameters.get('tfidf_max_features', 100)
     try:
-        new_jobs_df = safe_load_json(data_paths_config['jobs'])
-        new_applicants_df = safe_load_json(data_paths_config['applicants'])
+        new_jobs_df = safe_load_json_optimized(data_paths_config['jobs'], ['vaga_id', 'titulo_vaga', 'descricao'])
+        new_applicants_df = safe_load_json_optimized(data_paths_config['applicants'], ['candidato_id', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades'])
         if any(df is None for df in [new_jobs_df, new_applicants_df]):
             raise Exception("Falha ao carregar novos dados para retreino.")
         temp_processor = SimpleProcessor()
@@ -237,9 +242,12 @@ def initialize_components():
     download_and_unzip_data()
     try:
         logger.info("Inicializando componentes...")
-        jobs_df = safe_load_json(Config.DATA_PATHS['jobs'])
-        prospects_df = safe_load_json(Config.DATA_PATHS['prospects'])
-        applicants_df = safe_load_json(Config.DATA_PATHS['applicants'])
+        jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
+        prospects_cols = ['vaga_id', 'codigo', 'situacao_candidado']
+        applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
+        jobs_df = safe_load_json_optimized(Config.DATA_PATHS['jobs'], jobs_cols)
+        prospects_df = safe_load_json_optimized(Config.DATA_PATHS['prospects'], prospects_cols)
+        applicants_df = safe_load_json_optimized(Config.DATA_PATHS['applicants'], applicants_cols)
         if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
              raise ValueError("Um ou mais dataframes estão vazios ou não foram carregados.")
         processor = SimpleProcessor()
