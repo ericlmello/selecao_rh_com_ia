@@ -69,4 +69,3 @@ try:
 except OSError as e:
     print(f"Erro ao criar diretórios: {e}")
     raise
-
