@@ -64,20 +64,8 @@ def init_db():
     with app.app_context():
         db = get_db()
         with db as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS predictions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
-                    job_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
-                    success_probability REAL NOT NULL, recommendation TEXT,
-                    features_json TEXT, total_time REAL
-                );
-            ''')
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS evaluations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
-                    total_samples INTEGER, avg_prediction REAL, metrics_json TEXT
-                );
-            ''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS predictions (id INTEGER PRIMARY KEY, timestamp TEXT, job_id TEXT, candidate_id TEXT, success_probability REAL, recommendation TEXT, features_json TEXT, total_time REAL);''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS evaluations (id INTEGER PRIMARY KEY, timestamp TEXT, total_samples INTEGER, avg_prediction REAL, metrics_json TEXT);''')
         logger.info(f"Banco de dados SQLite inicializado em: {DATABASE}")
 
 # --- 6. VARIÁVEIS GLOBAIS E CLASSES ---
@@ -87,10 +75,7 @@ class RecommenderModel(torch.nn.Module):
     def __init__(self, input_size=201, hidden_layer_1_size=128, hidden_layer_2_size=64, dropout_rate=0.2):
         super(RecommenderModel, self).__init__()
         self.input_size = input_size
-        self.features = torch.nn.Sequential(
-            torch.nn.Linear(input_size, hidden_layer_1_size), torch.nn.ReLU(), torch.nn.Dropout(dropout_rate),
-            torch.nn.Linear(hidden_layer_1_size, hidden_layer_2_size), torch.nn.ReLU(), torch.nn.Dropout(dropout_rate)
-        )
+        self.features = torch.nn.Sequential(torch.nn.Linear(input_size, hidden_layer_1_size), torch.nn.ReLU(), torch.nn.Dropout(dropout_rate), torch.nn.Linear(hidden_layer_1_size, hidden_layer_2_size), torch.nn.ReLU(), torch.nn.Dropout(dropout_rate))
         self.classifier = torch.nn.Sequential(torch.nn.Linear(hidden_layer_2_size, 1), torch.nn.Sigmoid())
     def forward(self, x):
         return self.classifier(self.features(x))
@@ -144,8 +129,7 @@ def download_and_unzip_data():
                 if files:
                     found_file = os.path.join(root, files[0])
                     break
-            if not found_file:
-                raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
+            if not found_file: raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
             shutil.move(found_file, final_json_path)
             logger.info(f"Ficheiro '{os.path.basename(found_file)}' movido para '{final_json_path}'.")
             os.remove(zip_output_path)
@@ -155,18 +139,14 @@ def download_and_unzip_data():
             raise
 
 def safe_load_json(file_path):
-    """Carrega um ficheiro JSON, tentando diferentes formatos."""
     try:
         return pd.read_json(file_path, lines=True)
-    except ValueError:
+    except Exception:
         try:
             return pd.read_json(file_path)
         except Exception as e:
             logger.error(f"Falha ao carregar o ficheiro JSON '{file_path}': {e}")
             return None
-    except FileNotFoundError:
-        logger.error(f"Arquivo não encontrado: {file_path}")
-        return None
 
 def safe_clean_text(text):
     try:
@@ -473,4 +453,3 @@ if __name__ == '__main__':
         app.run(debug=True, host='127.0.0.1', port=5000)
     else:
         logger.error("Falha na inicialização. O servidor de desenvolvimento não será iniciado.")
-
