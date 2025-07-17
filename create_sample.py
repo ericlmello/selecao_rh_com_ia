@@ -1,11 +1,5 @@
 """
-Este script automatiza todo o processo de criação de dados para a aplicação:
-1. Descarrega os ficheiros de dados brutos (.zip) do Google Drive.
-2. Extrai os ficheiros JSON aninhados.
-3. Processa e "achata" os dados JSON para um formato de tabela limpo.
-4. Realiza uma análise de qualidade (verificação de nulos e resumo estatístico).
-5. Cria uma amostra pequena e otimizada desses dados.
-6. Salva a amostra final, pronta para ser usada pela aplicação.
+ETL dados gdrive, criação de amostra, describe, ver. nulos
 """
 
 import os
@@ -15,7 +9,7 @@ import gdown
 import zipfile
 import shutil
 
-# --- CONFIGURAÇÕES ---
+# 1--- CONFIGURAÇÕES ---
 # Define o número de registos de "prospects" que queremos na nossa amostra final.
 SAMPLE_SIZE = 500
 
@@ -29,7 +23,7 @@ GDRIVE_ZIP_FILE_IDS = {
     'jobs': '1h8Lk5LM8VE5TF80mngCcbsQ14qA2rbw_'
 }
 
-# --- FUNÇÕES DE PROCESSAMENTO ---
+# 2--- FUNÇÕES DE PROCESSAMENTO ---
 
 def carregar_json_bruto(caminho):
     """Carrega um ficheiro JSON bruto."""
@@ -95,7 +89,7 @@ def processar_applicants(data):
         records.append(record)
     return pd.DataFrame(records)
 
-# --- SCRIPT PRINCIPAL ---
+# 3--- SCRIPT PRINCIPAL ---
 if __name__ == "__main__":
     print("="*50)
     print("INICIANDO SCRIPT DE CRIAÇÃO DE AMOSTRA DE DADOS")
