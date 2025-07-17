@@ -1,74 +1,124 @@
 Sistema de Recomendação de Candidatos com IA
 Este projeto é uma aplicação web completa que utiliza Machine Learning para automatizar e otimizar o processo de seleção de candidatos, calculando a probabilidade de sucesso entre perfis e vagas de emprego.
 
-A solução é exposta através de uma API RESTful robusta, inclui monitoramento de modelos com MLflow, um portão de qualidade para retreino contínuo e está pronta para deploy na nuvem com o Render.
+A solução foi desenhada para ser eficiente e escalável, utilizando um fluxo de trabalho em duas etapas: um script de pré-processamento offline para tratar e criar uma amostra de dados, e uma aplicação Flask leve que consome esses dados para fazer predições em tempo real.
 
-📋 Funcionalidades Principais
-Matching com IA: Utiliza um modelo de rede neural (PyTorch) para analisar semanticamente currículos e descrições de vagas, gerando uma pontuação de compatibilidade.
+Funcionalidades Principais
+Pré-processamento de Dados Robusto: Um script (create_sample.py) descarrega, extrai e processa ficheiros JSON complexos e aninhados, transformando-os em tabelas limpas e estruturadas.
+
+Otimização de Memória: O script gera uma amostra de dados pequena e otimizada, permitindo que a aplicação funcione em ambientes com memória limitada, como o plano gratuito do Render.
+
+Matching com IA: A aplicação principal (app.py) utiliza um modelo de rede neural (PyTorch) para analisar a compatibilidade entre os perfis da amostra.
 
 API RESTful Completa: Oferece endpoints para predições, avaliação de modelo, retreino, consulta de dados e verificação de saúde do sistema.
 
-Download Automático de Dados: A aplicação descarrega e descompacta os ficheiros de dados necessários a partir do Google Drive na inicialização, mantendo o repositório leve.
-
-Monitoramento com MLflow: Integração nativa com MLflow para registar execuções, parâmetros e métricas de performance do modelo.
-
-Retreino com Portão de Qualidade: Permite o retreino de novos modelos com hiperparâmetros personalizáveis e só promove um novo modelo para produção se a sua performance (F1-Score) atingir um limite mínimo predefinido.
+Ciclo de Vida MLOps Completo: Inclui registo em banco de dados, monitoramento de métricas com MLflow e um portão de qualidade para o retreino de modelos.
 
 Pronto para Deploy: Configurado para deploy fácil na plataforma Render usando um ficheiro render.yaml e Gunicorn como servidor de produção.
 
-Testes Automatizados: Inclui uma suíte de testes com Pytest para garantir a qualidade e a estabilidade do código.
+Processamento de Dados e Otimização
+Para garantir a performance e a viabilidade do projeto em ambientes de nuvem, foi implementado um passo crucial de pré-processamento de dados.
 
-🛠️ Tecnologias Utilizadas
+A Limitação Técnica
+GitHub: A plataforma tem um limite estrito para o tamanho dos ficheiros (geralmente 100MB), o que torna inviável subir as bases de dados originais e grandes.
+
+Render (Plano Gratuito): O ambiente de produção oferece uma memória RAM limitada (512MB). Carregar e processar os ficheiros JSON grandes e complexos diretamente na aplicação excederia este limite, causando o erro "Ran out of memory".
+
+A Solução: create_sample.py
+Para contornar estas limitações, o script create_sample.py realiza um tratamento offline dos dados. Ele é o coração da nossa estratégia de otimização.
+
+Download e Extração: O script primeiro descarrega os ficheiros .zip do Google Drive e extrai os ficheiros JSON brutos.
+
+Tratamento do JSON: Utiliza funções de processamento personalizadas (processar_jobs, processar_prospects, etc.) para navegar pela estrutura complexa e "aninhada" dos ficheiros JSON originais. Ele "achata" os dados, transformando-os em tabelas simples e limpas (DataFrames).
+
+Análise de Qualidade: Após o tratamento, o script verifica automaticamente cada tabela em busca de dados em falta (nulos) e gera um resumo estatístico (describe()), garantindo a integridade dos dados.
+
+Criação da Amostra: Por fim, ele seleciona uma amostra representativa e pequena dos dados (500 registos) e salva-a em formato otimizado.
+
+O resultado é um conjunto de dados leve, limpo e pronto para ser usado, que é enviado para o GitHub e consumido pela aplicação principal.
+
+Ciclo de Vida da Aplicação: Do Dado à Decisão
+O sistema foi desenhado com um ciclo de vida completo em mente, garantindo não apenas a execução, mas também a auditoria, o monitoramento e a evolução contínua do modelo.
+
+A. Registro e Auditoria (Banco de Dados SQLite)
+Para garantir a rastreabilidade e a transparência, todas as operações importantes são registadas num banco de dados SQLite.
+
+Registo de Predições: Sempre que a rota /predict é chamada, um registo detalhado é salvo na tabela predictions. Isto inclui o timestamp, os IDs da vaga e do candidato, a probabilidade de sucesso calculada, a recomendação final e o tempo total da predição. Isto cria um histórico auditável de todas as recomendações feitas pelo sistema.
+
+Registo de Avaliações: Da mesma forma, quando a rota /evaluate_model é executada, um resumo da avaliação é guardado na tabela evaluations, incluindo as métricas de performance (Acurácia, F1-Score, etc.).
+
+B. Monitoramento e Avaliação (MLflow & Testes)
+A qualidade do modelo é constantemente monitorada.
+
+Avaliação de Performance: A rota /evaluate_model permite que a eficácia do modelo em produção seja verificada a qualquer momento. Ela usa um conjunto de dados de teste para calcular métricas chave (Acurácia, Precisão, Recall, F1-Score) e as regista no MLflow.
+
+Visualização com MLflow: Ao executar o comando mlflow ui localmente, é possível aceder a um painel de controlo visual para comparar as métricas de diferentes execuções, analisar a degradação do modelo ao longo do tempo e tomar decisões informadas sobre a necessidade de retreino.
+
+Testes Automatizados: A suíte de testes Pytest valida a integridade do código e a lógica de negócio, garantindo que novas alterações não quebrem funcionalidades existentes.
+
+C. Evolução Contínua (Retreino do Modelo)
+O modelo não é estático. A rota /trigger_retraining permite a sua evolução contínua.
+
+Retreino Sob Demanda: Esta rota POST inicia o processo de treinamento de um novo modelo. É possível enviar hiperparâmetros personalizados (como taxa de aprendizado ou número de épocas) no corpo da requisição para experimentar diferentes arquiteturas.
+
+Portão de Qualidade (Quality Gate): Um novo modelo só é promovido para produção se a sua performance for superior a um limite mínimo predefinido (ex: F1-Score >= 0.75). Se o novo modelo não atingir este patamar de qualidade, ele é descartado e o modelo antigo é mantido, garantindo que a performance do sistema nunca seja degradada.
+
+Tecnologias Utilizadas
 Backend: Flask, Gunicorn
 
 Machine Learning: PyTorch, Scikit-learn
 
 Manipulação de Dados: Pandas, NumPy
 
-Monitoramento: MLflow
-
 Utilitários: gdown (para downloads do Google Drive)
 
 Banco de Dados: SQLite
 
-🚀 Como Executar o Projeto Localmente
-Pré-requisitos
-Python 3.9+
+Fluxo de Trabalho e Execução
+O projeto opera em duas fases distintas:
 
-Git
+Fase 1: Preparação dos Dados (Executar uma única vez, localmente)
+Esta fase é realizada pelo script create_sample.py. O seu objetivo é pegar nos seus dados brutos e grandes e criar uma amostra pequena e limpa que será usada pela aplicação.
 
-1. Clonar o Repositório
-git clone https://github.com/seu-usuario/seu-repositorio.git
-cd seu-repositorio
+Pré-requisitos: Tenha o Python e o pip instalados.
 
-2. Criar e Ativar um Ambiente Virtual
-# Windows
-python -m venv venv
-venv\Scripts\activate
+Instale as dependências necessárias para o script:
 
-# macOS / Linux
-python3 -m venv venv
-source venv/bin/activate
+pip install pandas gdown
 
-3. Instalar as Dependências
+Execute o script: No seu terminal, na pasta raiz do projeto, execute:
+
+python create_sample.py
+
+Resultado: O script irá criar uma nova pasta data/ contendo os ficheiros jobs.json, prospects.json e applicants.json em formato otimizado e com um tamanho reduzido. São estes os ficheiros que devem ser enviados para o GitHub.
+
+Fase 2: Executar a Aplicação Principal
+Depois de gerar a amostra de dados, a aplicação principal pode ser executada tanto localmente como no Render.
+
+Instale todas as dependências do projeto:
+
 pip install -r requirements.txt
 
-4. Configurar os Dados
-O projeto está configurado para descarregar os dados do Google Drive automaticamente. Certifique-se de que os IDs dos seus ficheiros estão corretos no ficheiro config.py.
+Execute a aplicação Flask:
 
-5. Executar a Aplicação
 python app.py
 
-A aplicação estará disponível em http://127.0.0.1:5000.
+Aceda: A aplicação estará disponível em http://127.0.0.1:5000.
 
-⚙️ Endpoints da API
-A seguir, os principais endpoints disponíveis:
+Endpoints da API
+A seguir, os principais endpoints disponíveis na aplicação:
 
 Rota
 
 Método
 
 Descrição
+
+/
+
+GET
+
+Exibe a interface principal da aplicação.
 
 /predict
 
@@ -98,47 +148,26 @@ Verifica a saúde da aplicação e dos seus componentes.
 
 GET
 
-Lista as vagas disponíveis.
+Lista as vagas disponíveis na amostra de dados.
 
 /candidates
 
 GET
 
-Lista os candidatos disponíveis.
+Lista os candidatos disponíveis na amostra de dados.
 
 /matches
 
 GET
 
-Retorna combinações válidas de vaga-candidato.
+Retorna as combinações válidas de vaga-candidato da amostra.
 
-Exemplo de Requisição com curl
-# Fazer uma predição
-curl -X POST -H "Content-Type: application/json" -d '{"job_id": "4534", "candidate_id": "11132"}' http://127.0.0.1:5000/predict
-
-# Acionar o retreino
-curl -X POST -H "Content-Type: application/json" -d '{}' http://127.0.0.1:5000/trigger_retraining
-
-📈 Monitoramento com MLflow
-Para visualizar os resultados dos seus experimentos de avaliação e retreino:
-
-Inicie a Interface do MLflow: No terminal, na pasta do projeto, execute:
-
-mlflow ui
-
-Acesse no Navegador: Abra http://127.0.0.1:5000 (ou a porta indicada).
-
-Na interface, pode comparar execuções, visualizar métricas como accuracy e f1_score, e analisar os modelos guardados como artefactos.
-
-✅ Testes Automatizados
-Para garantir a qualidade do código, a suíte de testes pode ser executada com um único comando:
-
-pytest -v
-
-☁️ Deploy no Render
+Deploy no Render
 Este projeto está configurado para deploy contínuo no Render.
 
-Suba o seu código para um repositório no GitHub.
+Execute o create_sample.py localmente para gerar a pasta data/ com os dados de amostra.
+
+Suba o seu código, incluindo a pasta data/, para um repositório no GitHub.
 
 No painel do Render, crie um novo serviço do tipo Blueprint.
 
