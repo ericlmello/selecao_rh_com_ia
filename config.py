@@ -1,11 +1,11 @@
+# config.py
 import os
 
 # --- 1. DETECÇÃO DE AMBIENTE E DEFINIÇÃO DE CAMINHOS ---
-# Verifica se está a rodar no ambiente do Render.
+# Detecta se está a rodar no Render.
 IS_ON_RENDER = os.environ.get('RENDER')
 
-# CORREÇÃO: No Render, usa o diretório /tmp que é gravável.
-# Isto é necessário porque não estamos a usar um disco persistente.
+# No Render, usa o diretório /tmp que é gravável.
 # Localmente, usa o diretório atual ('.').
 BASE_PATH = '/tmp/app_data' if IS_ON_RENDER else '.'
 
