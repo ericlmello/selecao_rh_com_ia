@@ -1,4 +1,4 @@
-# config.py
+
 import os
 
 # --- 1. DETECÇÃO DE AMBIENTE E DEFINIÇÃO DE CAMINHOS ---
