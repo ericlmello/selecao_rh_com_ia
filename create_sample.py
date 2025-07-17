@@ -3,8 +3,9 @@ Este script automatiza todo o processo de criação de dados para a aplicação:
 1. Descarrega os ficheiros de dados brutos (.zip) do Google Drive.
 2. Extrai os ficheiros JSON aninhados.
 3. Processa e "achata" os dados JSON para um formato de tabela limpo.
-4. Cria uma amostra pequena e otimizada desses dados.
-5. Salva a amostra final, pronta para ser usada pela aplicação.
+4. Realiza uma análise de qualidade (verificação de nulos e resumo estatístico).
+5. Cria uma amostra pequena e otimizada desses dados.
+6. Salva a amostra final, pronta para ser usada pela aplicação.
 """
 
 import os
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     os.makedirs(temp_dir, exist_ok=True)
 
     # 1. Descarrega, extrai e processa todos os ficheiros
-    print("\n[PASSO 1 de 3] Descarregando e processando ficheiros JSON brutos...")
+    print("\n[PASSO 1 de 5] Descarregando e processando ficheiros JSON brutos...")
     
     raw_data_map = {}
     process_map = {
@@ -120,7 +121,6 @@ if __name__ == "__main__":
         gdown.download(id=file_id, output=zip_path, quiet=False)
         
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Assumindo que cada zip contém um único ficheiro json
             json_filename = zip_ref.namelist()[0]
             zip_ref.extract(json_filename, path=temp_dir)
             raw_json_path = os.path.join(temp_dir, json_filename)
@@ -133,11 +133,29 @@ if __name__ == "__main__":
     df_applicants_full = raw_data_map['applicants']
     print("  -> Ficheiros processados com sucesso!")
 
-    # 2. Cria a amostra
-    print(f"\n[PASSO 2 de 3] Criando amostra de {SAMPLE_SIZE} registros...")
+    # 2. Verificação de Dados Nulos
+    print("\n[PASSO 2 de 5] Verificando dados nulos nos ficheiros processados...")
+    for name, df in [('Jobs', df_jobs_full), ('Prospects', df_prospects_full), ('Applicants', df_applicants_full)]:
+        print(f"\n--- Análise de Nulos: {name} ---")
+        null_counts = df.isnull().sum()
+        null_counts = null_counts[null_counts > 0] # Filtra apenas colunas com nulos
+        if null_counts.empty:
+            print("  -> Nenhuma coluna com dados nulos encontrada. Excelente!")
+        else:
+            print(null_counts)
+
+    # 3. Resumo Estatístico
+    print("\n[PASSO 3 de 5] Gerando resumo estatístico (describe)...")
+    for name, df in [('Jobs', df_jobs_full), ('Prospects', df_prospects_full), ('Applicants', df_applicants_full)]:
+        print(f"\n--- Resumo Estatístico: {name} ---")
+        # include='all' para obter estatísticas de colunas numéricas e de texto
+        print(df.describe(include='all').transpose())
+
+    # 4. Cria a amostra
+    print(f"\n[PASSO 4 de 5] Criando amostra de {SAMPLE_SIZE} registros...")
     df_prospects_sample = df_prospects_full.head(SAMPLE_SIZE).copy()
 
-    # 3. Filtra os outros dataframes com base na amostra
+    # Filtra os outros dataframes com base na amostra
     valid_job_ids = df_prospects_sample['vaga_id'].astype(str).unique()
     valid_candidate_ids = df_prospects_sample['codigo'].astype(str).unique()
 
@@ -145,8 +163,8 @@ if __name__ == "__main__":
     df_applicants_sample = df_applicants_full[df_applicants_full['candidato_id'].astype(str).isin(valid_candidate_ids)]
     print("  -> Amostra e filtragem concluídas.")
 
-    # 4. Salva os novos ficheiros de amostra
-    print("\n[PASSO 3 de 3] Salvando ficheiros de amostra...")
+    # 5. Salva os novos ficheiros de amostra
+    print("\n[PASSO 5 de 5] Salvando ficheiros de amostra...")
     output_paths = {
         'jobs': os.path.join(DESTINATION_DATA_FOLDER, 'jobs.json'),
         'prospects': os.path.join(DESTINATION_DATA_FOLDER, 'prospects.json'),
