@@ -1,3 +1,6 @@
+'''
+Salva modelo localhost
+'''
 import torch
 import torch.nn as nn
 import os
@@ -46,7 +49,7 @@ def safe_print_model(message):
 def load_model(path):
     """Carrega o modelo - versão específica para seu formato de state_dict"""
     try:
-        print(f"🔄 Carregando modelo de: {path}")
+        print(f" Carregando modelo de: {path}")
         
         # Verificar se arquivo existe
         if not os.path.exists(path):
@@ -55,7 +58,7 @@ def load_model(path):
         
         # Carregar o checkpoint
         checkpoint = torch.load(path, map_location='cpu', weights_only=False)
-        print(f"✅ Checkpoint carregado: {type(checkpoint)}")
+        print(f" Checkpoint carregado: {type(checkpoint)}")
         
         # Seu modelo foi salvo como OrderedDict (state_dict direto)
         if hasattr(checkpoint, 'keys') and 'fc1.weight' in checkpoint:
@@ -82,9 +85,9 @@ def load_model(path):
             missing_layers = [layer for layer in expected_layers if layer not in checkpoint]
             
             if missing_layers:
-                print(f"⚠️ Camadas faltando: {missing_layers}")
+                print(f" Camadas faltando: {missing_layers}")
             else:
-                print("✅ Todas as camadas presentes")
+                print(" Todas as camadas presentes")
             
             # Criar modelo com as dimensões corretas
             model = JobMatchingModel(
@@ -95,17 +98,17 @@ def load_model(path):
             
             # Carregar os pesos
             model.load_state_dict(checkpoint)
-            print("✅ Pesos carregados com sucesso!")
+            print(" Pesos carregados com sucesso!")
             
         # Caso seja um dicionário com metadata (formato alternativo)
         elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            print("📋 Detectado: Dicionário com metadata")
+            print(" Detectado: Dicionário com metadata")
             
             input_size = checkpoint.get('input_size', 201)
             hidden_size = checkpoint.get('hidden_size', 128)
             output_size = checkpoint.get('output_size', 1)
             
-            print(f"📏 Parâmetros do checkpoint: input={input_size}, hidden={hidden_size}, output={output_size}")
+            print(f" Parâmetros do checkpoint: input={input_size}, hidden={hidden_size}, output={output_size}")
             
             model = JobMatchingModel(
                 input_size=input_size,
@@ -114,10 +117,10 @@ def load_model(path):
             )
             
             model.load_state_dict(checkpoint['model_state_dict'])
-            print("✅ Pesos carregados com sucesso!")
+            print(" Pesos carregados com sucesso!")
             
         else:
-            print("❌ Formato de checkpoint não reconhecido")
+            print(" Formato de checkpoint não reconhecido")
             print(f"Tipo: {type(checkpoint)}")
             if hasattr(checkpoint, 'keys'):
                 print(f"Chaves: {list(checkpoint.keys())[:10]}")
@@ -134,7 +137,7 @@ def load_model(path):
         if not hasattr(model, 'output_size'):
             model.output_size = output_size
             
-        print(f"🎯 Modelo pronto!")
+        print(f" Modelo pronto!")
         print(f"   Arquitetura: {model.input_size} → {model.hidden_size} → {model.hidden_size//2} → {model.output_size}")
         print(f"   Parâmetros: {sum(p.numel() for p in model.parameters())}")
         print(f"   Modo: {'Treino' if model.training else 'Avaliação'}")
@@ -142,8 +145,8 @@ def load_model(path):
         return model
         
     except Exception as e:
-        print(f"❌ Erro ao carregar modelo: {e}")
-        print("🆘 Criando modelo com pesos aleatórios...")
+        print(f" Erro ao carregar modelo: {e}")
+        print(" Criando modelo com pesos aleatórios...")
         
         # Fallback: modelo com arquitetura padrão
         model = JobMatchingModel(input_size=201, hidden_size=128, output_size=1)
@@ -154,5 +157,5 @@ def load_model(path):
         model.hidden_size = 128
         model.output_size = 1
         
-        print("⚠️ ATENÇÃO: Usando modelo com pesos NÃO treinados!")
+        print(" ATENÇÃO: Usando modelo com pesos NÃO treinados!")
         return model
