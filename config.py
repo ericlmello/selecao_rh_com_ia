@@ -1,13 +1,13 @@
-# config.py
 import os
 
 # --- 1. DETECÇÃO DE AMBIENTE E DEFINIÇÃO DE CAMINHOS ---
-# A forma mais robusta de encontrar o disco no Render é usar a variável de ambiente que ele fornece.
-RENDER_DISK_PATH = os.environ.get('RENDER_DISK_PATH')
+# Verifica se está a rodar no ambiente do Render.
+IS_ON_RENDER = os.environ.get('RENDER')
 
-# Se a variável RENDER_DISK_PATH existir, usa-a como caminho base.
-# Senão (em ambiente local), usa o diretório atual ('.').
-BASE_PATH = RENDER_DISK_PATH if RENDER_DISK_PATH else '.'
+# CORREÇÃO: No Render, usa o diretório /tmp que é gravável.
+# Isto é necessário porque não estamos a usar um disco persistente.
+# Localmente, usa o diretório atual ('.').
+BASE_PATH = '/tmp/app_data' if IS_ON_RENDER else '.'
 
 # Define os caminhos dinamicamente a partir do caminho base
 DATA_DIR = os.path.join(BASE_PATH, 'data')
@@ -57,7 +57,7 @@ class Config:
 
     # --- Configurações da Aplicação ---
     SECRET_KEY = os.environ.get('SECRET_KEY', 'uma-chave-secreta-de-desenvolvimento')
-    DEBUG = RENDER_DISK_PATH is None # Ativa o debug apenas se não estiver no Render
+    DEBUG = not IS_ON_RENDER # Ativa o debug apenas se não estiver no Render
 
 
 # --- 3. CRIAÇÃO DE DIRETÓRIOS ---
