@@ -30,6 +30,7 @@ Para contornar estas limitações, o script `create_sample.py` realiza um tratam
 2.  **Tratamento do JSON:** Utiliza funções de processamento personalizadas (`processar_jobs`, `processar_prospects`, etc.) para navegar pela estrutura complexa e "aninhada" dos ficheiros JSON originais. Ele "achata" os dados, transformando-os em tabelas simples e limpas (DataFrames).
 3.  **Análise de Qualidade:** Após o tratamento, o script verifica automaticamente cada tabela em busca de dados em falta (nulos) e gera um resumo estatístico (`describe()`), garantindo a integridade dos dados.
 4.  **Criação da Amostra:** Por fim, ele seleciona uma amostra representativa e pequena dos dados (500 registos) e salva-a em formato otimizado.
+5.  Importante verificar se existem dados nulos e obter uma descrição detalhada dos dados (describe())
 
 O resultado é um conjunto de dados leve, limpo e pronto para ser usado, que é enviado para o GitHub e consumido pela aplicação principal.
 
