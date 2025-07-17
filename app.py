@@ -3,6 +3,7 @@ Aplicação Flask principal para o Sistema de Recomendação de Candidatos.
 
 """
 
+
 # --- 1. IMPORTAÇÕES PRINCIPAIS ---
 import os
 import sys
@@ -10,7 +11,10 @@ import time
 import logging
 import json
 import sqlite3
+import shutil
 import traceback
+import zipfile
+import gc
 from datetime import datetime
 
 # --- 2. IMPORTAÇÕES DE BIBLIOTECAS DE DADOS E ML ---
@@ -23,17 +27,18 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import mlflow
 import mlflow.pytorch
+import gdown
 
 # --- 3. CONFIGURAÇÃO DE AMBIENTE (LOCAL vs RENDER) ---
 try:
-    # O config.py agora é muito mais simples
-    from config import Config, DATABASE_PATH, MLRUNS_DIR
+    from config import Config, DATABASE_PATH, MLRUNS_DIR, DATA_DIR
 except ImportError:
     class Config:
         DATA_PATHS = {}
         MODEL_PATH = 'models/recommender_model.pth'
     DATABASE_PATH = 'predictions.db'
     MLRUNS_DIR = 'mlruns'
+    DATA_DIR = 'data'
 
 # --- 4. CONFIGURAÇÃO DE LOGGING E MLFLOW ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.FileHandler('app.log', encoding='utf-8'), logging.StreamHandler(sys.stdout)])
@@ -102,11 +107,86 @@ class SimpleProcessor:
             self.vectorizers['text'].fit(sample_texts)
 
 # --- 7. FUNÇÕES AUXILIARES ---
-def safe_load_json(file_path):
+
+def carregar_json_bruto(caminho):
+    with open(caminho, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def processar_jobs(data):
+    records = []
+    for vaga_id, conteudo in data.items():
+        info = conteudo.get('informacoes_basicas', {})
+        perfil = conteudo.get('perfil_vaga', {})
+        record = {'vaga_id': vaga_id, 'data_requisicao': info.get('data_requicisao'), 'limite_contratacao': info.get('limite_esperado_para_contratacao'), 'titulo_vaga': info.get('titulo_vaga'), 'cliente': info.get('cliente'), 'solicitante_cliente': info.get('solicitante_cliente'), 'empresa_divisao': info.get('empresa_divisao'), 'analista_responsavel': info.get('analista_responsavel'), 'tipo_contratacao': info.get('tipo_contratacao'), 'pais': perfil.get('pais'), 'estado': perfil.get('estado'), 'cidade': perfil.get('cidade')}
+        records.append(record)
+    return pd.DataFrame(records)
+
+def processar_prospects(data):
+    records = []
+    for vaga_id, conteudo in data.items():
+        lista = conteudo.get('prospects', [])
+        for item in lista:
+            record = {'vaga_id': vaga_id}
+            record.update(item)
+            records.append(record)
+    return pd.DataFrame(records)
+
+def processar_applicants(data):
+    records = []
+    for candidato_id, conteudo in data.items():
+        infos_basicas = conteudo.get('infos_basicas', {})
+        info_pessoais = conteudo.get('informacoes_pessoais', {})
+        info_profissionais = conteudo.get('informacoes_profissionais', {})
+        formacao_idiomas = conteudo.get('formacao_e_idiomas', {})
+        record = {'candidato_id': candidato_id, 'cargo_atual': conteudo.get('cargo_atual'), 'nome': infos_basicas.get('nome'), 'email': infos_basicas.get('email'), 'telefone': infos_basicas.get('telefone'), 'idade': info_pessoais.get('idade'), 'cidade': info_pessoais.get('cidade'), 'estado': info_pessoais.get('estado'), 'nacionalidade': info_pessoais.get('nacionalidade'), 'estado_civil': info_pessoais.get('estado_civil'), 'experiencia_anos': info_profissionais.get('experiencia_total_anos'), 'ultimo_cargo': info_profissionais.get('ultimo_cargo'), 'ultima_empresa': info_profissionais.get('ultima_empresa'), 'setor_atuacao': info_profissionais.get('setor_atuacao'), 'nivel_educacao': formacao_idiomas.get('nivel_educacao'), 'curso': formacao_idiomas.get('curso'), 'instituicao': formacao_idiomas.get('instituicao'), 'idiomas': formacao_idiomas.get('idiomas'), 'habilidades': conteudo.get('habilidades')}
+        records.append(record)
+    return pd.DataFrame(records)
+
+def download_and_process_data():
+    logger.info("Verificando e processando ficheiros de dados...")
+    for key, file_id in Config.GDRIVE_ZIP_FILE_IDS.items():
+        final_json_path = Config.DATA_PATHS[key]
+        if os.path.exists(final_json_path):
+            logger.info(f"Ficheiro processado '{os.path.basename(final_json_path)}' já existe.")
+            continue
+        logger.warning(f"Ficheiro '{os.path.basename(final_json_path)}' não encontrado. A descarregar e processar...")
+        zip_output_path = Config.ZIP_OUTPUT_PATHS[key]
+        try:
+            gdown.download(id=file_id, output=zip_output_path, quiet=False)
+            temp_extract_dir = os.path.join(DATA_DIR, f"temp_{key}")
+            with zipfile.ZipFile(zip_output_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_extract_dir)
+            raw_json_file = None
+            for root, _, files in os.walk(temp_extract_dir):
+                if files:
+                    raw_json_file = os.path.join(root, files[0])
+                    break
+            if not raw_json_file: raise Exception(f"Nenhum ficheiro de dados encontrado dentro de {zip_output_path}")
+            logger.info(f"Processando ficheiro JSON bruto: {raw_json_file}")
+            raw_data = carregar_json_bruto(raw_json_file)
+            df_processado = None
+            if key == 'jobs': df_processado = processar_jobs(raw_data)
+            elif key == 'prospects': df_processado = processar_prospects(raw_data)
+            elif key == 'applicants': df_processado = processar_applicants(raw_data)
+            if df_processado is None: raise Exception(f"Falha ao processar o ficheiro para a chave '{key}'")
+            df_processado.to_json(final_json_path, orient='records', lines=True, force_ascii=False)
+            logger.info(f"Ficheiro processado e salvo em: '{final_json_path}'")
+            os.remove(zip_output_path)
+            shutil.rmtree(temp_extract_dir)
+        except Exception as e:
+            logger.error(f"Falha ao obter e processar dados para '{key}': {e}")
+            raise
+
+def safe_load_processed_json(file_path, columns_to_keep, dtype_map=None, sample_size=None):
     try:
-        return pd.read_json(file_path, lines=True)
+        df = pd.read_json(file_path, lines=True, dtype=dtype_map)
+        actual_cols = [col for col in columns_to_keep if col in df.columns]
+        df = df[actual_cols]
+        if sample_size and len(df) > sample_size:
+            df = df.head(sample_size)
+        return df
     except Exception as e:
-        logger.error(f"Falha ao carregar o ficheiro JSON '{file_path}': {e}")
+        logger.error(f"Falha ao carregar o ficheiro JSON processado '{file_path}': {e}")
         return None
 
 def safe_clean_text(text):
@@ -152,18 +232,87 @@ def extract_single_prediction_features(job_data, candidate_data):
         logger.error(f"Erro na extração de features: {e}.")
         return None
 
+def train_new_model(data_paths_config, output_model_dir, hyperparameters):
+    logger.info(f"Iniciando o treinamento de um novo modelo com hiperparâmetros: {hyperparameters}")
+    learning_rate = hyperparameters.get('learning_rate', 0.001)
+    epochs = hyperparameters.get('epochs', 5)
+    hidden_layer_1_size = hyperparameters.get('hidden_layer_1_size', 128)
+    hidden_layer_2_size = hyperparameters.get('hidden_layer_2_size', 64)
+    dropout_rate = hyperparameters.get('dropout_rate', 0.2)
+    tfidf_max_features = hyperparameters.get('tfidf_max_features', 100)
+    try:
+        new_jobs_df = safe_load_processed_json(data_paths_config['jobs'], ['vaga_id', 'titulo_vaga', 'descricao'])
+        new_applicants_df = safe_load_processed_json(data_paths_config['applicants'], ['candidato_id', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades'])
+        if any(df is None for df in [new_jobs_df, new_applicants_df]):
+            raise Exception("Falha ao carregar novos dados para retreino.")
+        temp_processor = SimpleProcessor()
+        temp_processor.initialize_text_vectorizers(new_applicants_df, new_jobs_df, max_features=tfidf_max_features)
+        input_size_for_training = 2 * tfidf_max_features + 1
+        temp_processor.scaler = MinMaxScaler()
+        temp_processor.scaler.fit(np.random.rand(10, input_size_for_training))
+        new_model = RecommenderModel(input_size=input_size_for_training, hidden_layer_1_size=hidden_layer_1_size, hidden_layer_2_size=hidden_layer_2_size, dropout_rate=dropout_rate)
+        optimizer = torch.optim.Adam(new_model.parameters(), lr=learning_rate)
+        criterion = torch.nn.BCELoss()
+        logger.info(f"Simulando treinamento do modelo por {epochs} épocas...")
+        for _ in range(epochs):
+            dummy_features = torch.randn(10, input_size_for_training)
+            dummy_labels = torch.randint(0, 2, (10, 1)).float()
+            optimizer.zero_grad()
+            outputs = new_model(dummy_features)
+            loss = criterion(outputs, dummy_labels)
+            loss.backward()
+            optimizer.step()
+        logger.info("Simulação de treinamento concluída.")
+        model_filename = f"model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pth"
+        full_output_path = os.path.join(output_model_dir, model_filename)
+        torch.save(new_model.state_dict(), full_output_path)
+        logger.info(f"Novo modelo salvo em: {full_output_path}")
+        return full_output_path, temp_processor
+    except Exception as e:
+        logger.error(f"Erro durante o treinamento do novo modelo: {e}\n{traceback.format_exc()}")
+        return None, None
+
 # --- 8. FUNÇÃO DE INICIALIZAÇÃO PRINCIPAL ---
 def initialize_components():
     global processor, model, jobs_df, prospects_df, applicants_df
+    download_and_process_data()
     try:
-        logger.info("Inicializando componentes com dados de amostra pré-processados...")
+        logger.info("Inicializando componentes com dados processados e amostrados...")
         
-        jobs_df = safe_load_json(Config.DATA_PATHS['jobs'])
-        prospects_df = safe_load_json(Config.DATA_PATHS['prospects'])
-        applicants_df = safe_load_json(Config.DATA_PATHS['applicants'])
+        SAMPLE_SIZE = 500
+        
+        prospects_cols = ['vaga_id', 'codigo', 'situacao_candidado']
+        prospects_dtypes = {'vaga_id': 'str', 'codigo': 'str', 'situacao_candidado': 'category'}
+        
+        prospects_df = safe_load_processed_json(Config.DATA_PATHS['prospects'], prospects_cols, prospects_dtypes, sample_size=SAMPLE_SIZE)
+        if prospects_df is None or prospects_df.empty:
+            raise ValueError("Não foi possível carregar a amostra de prospects.")
+        logger.info(f"Amostra de {len(prospects_df)} prospects carregada.")
 
+        valid_job_ids = prospects_df['vaga_id'].unique()
+        valid_candidate_ids = prospects_df['codigo'].unique()
+        
+        jobs_cols = ['vaga_id', 'titulo_vaga', 'descricao', 'cliente']
+        jobs_dtypes = {'vaga_id': 'str', 'cliente': 'category'}
+        full_jobs_df = safe_load_processed_json(Config.DATA_PATHS['jobs'], jobs_cols, jobs_dtypes)
+        
+        applicants_cols = ['candidato_id', 'nome', 'cargo_atual', 'campo_extra_cv_pt', 'campo_extra_cv_en', 'habilidades']
+        applicants_dtypes = {'candidato_id': 'str', 'cargo_atual': 'category'}
+        full_applicants_df = safe_load_processed_json(Config.DATA_PATHS['applicants'], applicants_cols, applicants_dtypes)
+
+        if full_jobs_df is None or full_applicants_df is None:
+            raise ValueError("Falha ao carregar os dataframes completos de jobs ou applicants.")
+
+        jobs_df = full_jobs_df[full_jobs_df['vaga_id'].astype(str).isin(valid_job_ids)]
+        applicants_df = full_applicants_df[full_applicants_df['candidato_id'].astype(str).isin(valid_candidate_ids)]
+        
+        logger.info(f"Dados filtrados: {len(jobs_df)} vagas, {len(applicants_df)} candidatos.")
+        
+        del full_jobs_df, full_applicants_df
+        gc.collect()
+        
         if any(df is None or df.empty for df in [jobs_df, prospects_df, applicants_df]):
-             raise ValueError("Um ou mais dataframes de amostra estão vazios ou não foram carregados.")
+             raise ValueError("Um ou mais dataframes estão vazios após a amostragem e filtragem.")
         
         processor = SimpleProcessor()
         processor.initialize_text_vectorizers(applicants_df, jobs_df)
@@ -258,11 +407,65 @@ def evaluate_model():
         logger.error(f"Erro na avaliação: {e}\n{traceback.format_exc()}")
         return jsonify({'error': f'Erro na avaliação: {str(e)}'}), 500
 
+@app.route('/trigger_retraining', methods=['POST'])
+def trigger_retraining():
+    global model, processor
+    MINIMUM_F1_SCORE_THRESHOLD = 0.75
+    logger.info(f"GATE DE QUALIDADE: O F1-Score do novo modelo deve ser >= {MINIMUM_F1_SCORE_THRESHOLD}")
+    request_data = request.json if request.json else {}
+    hyperparameters = {'learning_rate': request_data.get('learning_rate', Config.LEARNING_RATE), 'epochs': request_data.get('epochs', Config.EPOCHS), 'hidden_layer_1_size': request_data.get('hidden_layer_1_size', Config.HIDDEN_SIZE), 'hidden_layer_2_size': request_data.get('hidden_layer_2_size', Config.HIDDEN_SIZE // 2), 'dropout_rate': request_data.get('dropout_rate', 0.2), 'tfidf_max_features': request_data.get('tfidf_max_features', 100)}
+    logger.info(f"Requisição para retreino recebida com hiperparâmetros: {hyperparameters}")
+    try:
+        with mlflow.start_run(run_name="Continuous Retraining Candidate"):
+            mlflow.log_params(hyperparameters)
+            new_model_path, new_processor_instance = train_new_model(Config.DATA_PATHS, Config.MODEL_DIR, hyperparameters)
+            if new_model_path is None or new_processor_instance is None:
+                return jsonify({'status': 'failed', 'message': 'Erro durante o treinamento.'}), 500
+            input_size = 2 * hyperparameters['tfidf_max_features'] + 1
+            temp_new_model = load_model(new_model_path, input_size=input_size, **hyperparameters)
+            y_true_for_eval, y_pred_for_eval = [], []
+            for _, prospect in prospects_df.sample(n=min(100, len(prospects_df)), random_state=42).iterrows():
+                situacao = str(prospect.get('situacao_candidado', '')).lower()
+                if 'aprovado' in situacao or 'contratado' in situacao: true_label = 1
+                elif 'rejeitado' in situacao or 'reprovado' in situacao: true_label = 0
+                else: continue
+                job_data = jobs_df[jobs_df['vaga_id'].astype(str) == str(prospect['vaga_id'])]
+                candidate_data = applicants_df[applicants_df['candidato_id'].astype(str) == str(prospect['codigo'])]
+                if job_data.empty or candidate_data.empty: continue
+                features = extract_single_prediction_features(job_data.iloc[0], candidate_data.iloc[0])
+                if features is None: continue
+                features = np.pad(features, (0, max(0, input_size - len(features))), 'constant')[:input_size]
+                features_normalized = new_processor_instance.scaler.transform([features])
+                features_tensor = torch.FloatTensor(features_normalized)
+                with torch.no_grad():
+                    pred = temp_new_model(features_tensor).item()
+                y_true_for_eval.append(true_label)
+                y_pred_for_eval.append(pred)
+            if not y_true_for_eval: raise Exception("Nenhum dado de avaliação válido encontrado.")
+            retrain_metrics = calculate_metrics(y_true_for_eval, y_pred_for_eval, threshold=0.5)
+            new_f1_score = retrain_metrics.get('f1_score', 0)
+            logger.info(f"AVALIAÇÃO DO NOVO MODELO: F1-Score = {new_f1_score}")
+            mlflow.log_metrics(retrain_metrics)
+            if new_f1_score >= MINIMUM_F1_SCORE_THRESHOLD:
+                logger.info(f"QUALIDADE APROVADA! F1-Score ({new_f1_score}) atinge o limite.")
+                model, processor = temp_new_model, new_processor_instance
+                mlflow.pytorch.log_model(pytorch_model=model, artifact_path="recommender_model")
+                return jsonify({'status': 'success', 'message': f'Modelo APROVADO e atualizado. Novo F1-Score: {new_f1_score}'})
+            else:
+                logger.warning(f"QUALIDADE REPROVADA! F1-Score ({new_f1_score}) abaixo do limite.")
+                mlflow.pytorch.log_model(pytorch_model=temp_new_model, artifact_path="rejected_model")
+                return jsonify({'status': 'rejected', 'message': f'Modelo REPROVADO. Novo F1-Score: {new_f1_score}'}), 202
+    except Exception as e:
+        logger.error(f"Erro crítico no retreino: {e}\n{traceback.format_exc()}")
+        return jsonify({'status': 'failed', 'error': str(e)}), 500
+
 @app.route('/jobs')
 def get_jobs():
     try:
         if jobs_df is None: return jsonify({'error': 'Dados de vagas não carregados.'}), 500
-        return jsonify(jobs_df[['vaga_id', 'titulo_vaga', 'cliente']].to_dict(orient='records'))
+        vagas_com_prospects = prospects_df['vaga_id'].astype(str).unique()
+        jobs_filtered = jobs_df[jobs_df['vaga_id'].astype(str).isin(vagas_com_prospects)]
+        return jsonify(jobs_filtered[['vaga_id', 'titulo_vaga', 'cliente']].head(500).to_dict(orient='records'))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -270,7 +473,9 @@ def get_jobs():
 def get_candidates():
     try:
         if applicants_df is None: return jsonify({'error': 'Dados de candidatos não carregados.'}), 500
-        return jsonify(applicants_df[['candidato_id', 'nome', 'cargo_atual']].to_dict(orient='records'))
+        candidatos_com_prospects = prospects_df['codigo'].astype(str).unique()
+        candidates_filtered = applicants_df[applicants_df['candidato_id'].astype(str).isin(candidatos_com_prospects)]
+        return jsonify(candidates_filtered[['candidato_id', 'nome', 'cargo_atual']].head(500).to_dict(orient='records'))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -279,7 +484,7 @@ def get_matches():
     try:
         if prospects_df is None: return jsonify({'error': 'Dados de prospects não carregados.'}), 500
         matches = []
-        for _, prospect in prospects_df.iterrows():
+        for _, prospect in prospects_df.head(1000).iterrows():
             vaga_id, candidato_codigo = str(prospect.get('vaga_id')), str(prospect.get('codigo'))
             job_data = jobs_df[jobs_df['vaga_id'].astype(str) == vaga_id]
             candidate_data = applicants_df[applicants_df['candidato_id'].astype(str) == candidato_codigo]
@@ -300,12 +505,23 @@ def health():
     data_ok = all([df is not None and not df.empty for df in [jobs_df, prospects_df, applicants_df]])
     return jsonify({'status': 'ok' if all([processor, model, db_ok, data_ok]) else 'error', 'components': {'processor': processor is not None, 'model': model is not None, 'database': 'ok' if db_ok else 'error', 'data_loaded_and_populated': data_ok}, 'data_counts': {'jobs': len(jobs_df) if jobs_df is not None else 0, 'prospects': len(prospects_df) if prospects_df is not None else 0, 'applicants': len(applicants_df) if applicants_df is not None else 0}})
 
-# --- 10. INICIALIZAÇÃO DA APLICAÇÃO (ESCOPO GLOBAL) ---
+# --- 10. BLOCO DE EXECUÇÃO PRINCIPAL ---
+def create_dummy_files_if_needed():
+    IS_ON_RENDER = os.environ.get('RENDER')
+    if IS_ON_RENDER: return
+    if not os.path.exists(Config.MODEL_PATH):
+        dummy_model = RecommenderModel()
+        torch.save(dummy_model.state_dict(), Config.MODEL_PATH)
+        logger.warning(f"Modelo dummy criado em: {Config.MODEL_PATH}")
+    if not os.path.exists(Config.DATA_PATHS['jobs']):
+        # Adicione aqui a lógica para criar ficheiros JSON dummy se necessário
+        logger.warning("Ficheiros de dados dummy não encontrados. Crie-os ou a aplicação pode falhar.")
+
+# --- 11. INICIALIZAÇÃO DA APLICAÇÃO (ESCOPO GLOBAL) ---
 logger.info("Iniciando a configuração da aplicação...")
 init_db()
 initialization_success = initialize_components()
 
-# --- 11. BLOCO DE EXECUÇÃO (APENAS PARA DESENVOLVIMENTO LOCAL) ---
 if __name__ == '__main__':
     if initialization_success:
         logger.info("Iniciando servidor de desenvolvimento Flask...")
